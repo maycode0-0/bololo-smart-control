@@ -45,11 +45,15 @@ class HybridSetupTests(unittest.IsolatedAsyncioTestCase):
         )
         self.cloud = SimpleNamespace(
             async_login=AsyncMock(side_effect=BololoConnectionError("no internet")),
+            async_ensure_authenticated=AsyncMock(),
             async_get_devices=AsyncMock(side_effect=BololoConnectionError("no internet")),
             async_get_status=AsyncMock(side_effect=BololoConnectionError("no internet")),
         )
         self.store = SimpleNamespace(
             async_load=AsyncMock(return_value={"devices": [DEVICE]}), async_save=AsyncMock()
+        )
+        self.auth_store = SimpleNamespace(
+            async_load=AsyncMock(return_value=None), async_save=AsyncMock()
         )
 
     async def asyncTearDown(self):
@@ -60,6 +64,7 @@ class HybridSetupTests(unittest.IsolatedAsyncioTestCase):
     async def setup(self):
         with (
             patch("custom_components.bololo.Store", return_value=self.store),
+            patch("custom_components.bololo._AuthStore", return_value=self.auth_store),
             patch(
                 "custom_components.bololo.BololoClient", return_value=self.cloud
             ) as cloud_factory,
@@ -73,6 +78,7 @@ class HybridSetupTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_restarts_with_cached_inventory_without_cloud_login(self):
         await self.setup()
         self.cloud.async_login.assert_not_awaited()
+        self.cloud.async_ensure_authenticated.assert_not_awaited()
         self.cloud.async_get_devices.assert_not_awaited()
         self.cloud.async_get_status.assert_not_awaited()
         coordinator = self.hass.data[DOMAIN][self.entry.entry_id]
@@ -144,6 +150,24 @@ class MixedCoordinatorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(coordinator.data[device_id(DEVICE)].transport, "lan")
             self.assertFalse(coordinator.data[device_id(OTHER_DEVICE)].available)
             self.assertEqual(coordinator.data[device_id(OTHER_DEVICE)].error_kind, "auth")
+            entry.async_start_reauth.assert_called_once_with(hass)
+        finally:
+            await coordinator.async_shutdown()
+
+    async def test_inventory_auth_error_requests_reauth_even_when_all_devices_use_lan(self):
+        hass = HomeAssistant(str(Path(__file__).parent))
+        entry = SimpleNamespace(async_start_reauth=Mock(), async_on_unload=Mock())
+        client = SimpleNamespace(
+            async_get_devices=AsyncMock(return_value=[DEVICE]),
+            async_get_status=AsyncMock(return_value={"switch": True}),
+            last_transport={device_id(DEVICE): "lan"},
+            inventory_error=BololoAuthError("expired"),
+        )
+        coordinator = BololoCoordinator(hass, entry, client, {"wifi": PRODUCT})
+        try:
+            for _ in range(2):
+                coordinator.data = await coordinator._async_update_data()
+            self.assertTrue(coordinator.data[device_id(DEVICE)].available)
             entry.async_start_reauth.assert_called_once_with(hass)
         finally:
             await coordinator.async_shutdown()

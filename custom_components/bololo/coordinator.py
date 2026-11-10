@@ -44,6 +44,7 @@ class BololoCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         *,
         inventory_store=None,
         saved_inventory=None,
+        auth_session=None,
     ) -> None:
         super().__init__(
             hass,
@@ -61,11 +62,19 @@ class BololoCoordinator(DataUpdateCoordinator[dict[str, DeviceState]]):
         self._inventory_store = inventory_store
         self._saved_inventory = saved_inventory
         self._reauth_requested = False
+        self._auth_session = auth_session
+
+    async def async_shutdown(self):
+        if self._auth_session is not None:
+            await self._auth_session.async_close()
+        await super().async_shutdown()
 
     async def _async_update_data(self) -> dict[str, DeviceState]:
         try:
             devices = await self.client.async_get_devices()
             await self._async_save_inventory(devices)
+            if isinstance(getattr(self.client, "inventory_error", None), BololoAuthError):
+                self._async_request_reauth()
             supported = []
             self.unsupported = {}
             for device in devices:

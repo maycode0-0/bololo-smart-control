@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from ipaddress import IPv4Address
 
 import voluptuous as vol
@@ -11,7 +12,13 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import BololoAuthError, BololoClient, BololoError
+from .api import (
+    BololoAuthError,
+    BololoCaptchaRequired,
+    BololoClient,
+    BololoError,
+    BololoRateLimitError,
+)
 from .const import (
     CONF_CONNECTION_MODE,
     CONF_COUNTRY_CODE,
@@ -44,52 +51,188 @@ class BololoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry):
         return BololoOptionsFlow()
 
+    def __init__(self):
+        super().__init__()
+        self._account = {}
+        self._client = None
+        self._captcha = None
+        self._sent_at = float("-inf")
+        self._authenticated = False
+
+    def _defaults(self):
+        if self.source == config_entries.SOURCE_REAUTH:
+            return self._get_reauth_entry().data
+        return {}
+
     async def async_step_user(self, user_input=None):
         errors = {}
-        default_mode = DEFAULT_CONNECTION_MODE
-        if self.source == config_entries.SOURCE_REAUTH:
-            default_mode = self._get_reauth_entry().data.get(
-                CONF_CONNECTION_MODE, DEFAULT_CONNECTION_MODE
-            )
+        defaults = self._defaults()
         if user_input is not None:
-            user_input = dict(user_input)
-            user_input.setdefault(CONF_CONNECTION_MODE, default_mode)
-            user_input[CONF_USERNAME] = user_input[CONF_USERNAME].strip()
-            user_input[CONF_COUNTRY_CODE] = user_input[CONF_COUNTRY_CODE].strip().lstrip("+")
-            client = BololoClient(
-                async_get_clientsession(self.hass),
-                username=user_input[CONF_USERNAME],
-                password=user_input[CONF_PASSWORD],
-                country_code=user_input[CONF_COUNTRY_CODE],
-            )
-            try:
-                await client.async_login()
-                devices = await client.async_get_devices()
-            except BololoAuthError:
-                errors["base"] = "invalid_auth"
-            except BololoError:
-                errors["base"] = "cannot_connect"
-            else:
-                user_input[CONF_DEVICES] = minimal_inventory(devices)
-                await self.async_set_unique_id(
-                    client.uid
-                    or f"{user_input[CONF_COUNTRY_CODE]}:{user_input[CONF_USERNAME].casefold()}"
+            self._account = {
+                CONF_USERNAME: user_input[CONF_USERNAME].strip(),
+                CONF_COUNTRY_CODE: user_input.get(CONF_COUNTRY_CODE, "86").strip().lstrip("+"),
+                CONF_CONNECTION_MODE: user_input.get(
+                    CONF_CONNECTION_MODE,
+                    defaults.get(CONF_CONNECTION_MODE, DEFAULT_CONNECTION_MODE),
+                ),
+                "mobile_country_code": user_input.get("mobile_country_code", "CN"),
+                "auth_method": user_input.get(
+                    "auth_method", "password" if CONF_PASSWORD in user_input else "sms"
+                ),
+            }
+            if not self._account[CONF_USERNAME] or not self._account[CONF_COUNTRY_CODE].isdigit():
+                errors["base"] = "invalid_account"
+            elif self._account["auth_method"] == "password":
+                return await self.async_step_password(
+                    user_input if CONF_PASSWORD in user_input else None
                 )
-                if self.source == config_entries.SOURCE_REAUTH:
-                    entry = self._get_reauth_entry()
-                    self._abort_if_unique_id_mismatch()
-                    return self.async_update_reload_and_abort(entry, data_updates=user_input)
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=user_input[CONF_USERNAME], data=user_input)
+            elif not self._account[CONF_USERNAME].isdigit():
+                errors["base"] = "invalid_account"
+            else:
+                self._client = BololoClient(
+                    async_get_clientsession(self.hass),
+                    username=self._account[CONF_USERNAME],
+                    country_code=self._account[CONF_COUNTRY_CODE],
+                    mobile_country_code=self._account["mobile_country_code"],
+                )
+                return await self._send_sms()
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_USERNAME): str,
-                    vol.Required(CONF_PASSWORD): str,
-                    vol.Required(CONF_COUNTRY_CODE, default="86"): str,
-                    vol.Required(CONF_CONNECTION_MODE, default=default_mode): _mode_selector(),
+                    vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "")): str,
+                    vol.Required(
+                        CONF_COUNTRY_CODE, default=defaults.get(CONF_COUNTRY_CODE, "86")
+                    ): str,
+                    vol.Required(
+                        "mobile_country_code", default=defaults.get("mobile_country_code", "CN")
+                    ): selector.CountrySelector(),
+                    vol.Required("auth_method", default="sms"): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=["sms", "password"],
+                            translation_key="auth_method",
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Required(
+                        CONF_CONNECTION_MODE,
+                        default=defaults.get(CONF_CONNECTION_MODE, DEFAULT_CONNECTION_MODE),
+                    ): _mode_selector(),
                 }
+            ),
+            errors=errors,
+        )
+
+    async def _finish(self):
+        devices = await self._client.async_get_devices()
+        data = {
+            **self._account,
+            "auth": self._client.auth,
+            CONF_DEVICES: minimal_inventory(devices),
+        }
+        await self.async_set_unique_id(
+            self._client.uid or f"{data[CONF_COUNTRY_CODE]}:{data[CONF_USERNAME].casefold()}"
+        )
+        if self.source == config_entries.SOURCE_REAUTH:
+            entry = self._get_reauth_entry()
+            self._abort_if_unique_id_mismatch()
+            updated = {**entry.data, **data}
+            if data["auth_method"] == "sms":
+                updated.pop(CONF_PASSWORD, None)
+            return self.async_update_reload_and_abort(entry, data=updated)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=data[CONF_USERNAME], data=data)
+
+    async def async_step_password(self, user_input=None):
+        errors = {}
+        if user_input is not None:
+            self._account[CONF_PASSWORD] = user_input[CONF_PASSWORD]
+            self._client = BololoClient(
+                async_get_clientsession(self.hass),
+                username=self._account[CONF_USERNAME],
+                password=self._account[CONF_PASSWORD],
+                country_code=self._account[CONF_COUNTRY_CODE],
+                mobile_country_code=self._account["mobile_country_code"],
+            )
+            try:
+                await self._client.async_login()
+                return await self._finish()
+            except BololoAuthError:
+                errors["base"] = "invalid_auth"
+            except BololoError:
+                errors["base"] = "cannot_connect"
+        return self.async_show_form(
+            step_id="password",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PASSWORD): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def _send_sms(self, captcha_code=None):
+        if time.monotonic() - self._sent_at < 60:
+            return await self.async_step_sms(_errors={"base": "sms_cooldown"})
+        # Count attempts even on timeouts: the server may already have sent the code.
+        self._sent_at = time.monotonic()
+        try:
+            await self._client.async_request_sms(
+                self._captcha["id"] if self._captcha else None, captcha_code
+            )
+        except BololoCaptchaRequired:
+            self._sent_at = float("-inf")
+            try:
+                self._captcha = await self._client.async_get_captcha()
+            except BololoError:
+                return await self.async_step_sms(_errors={"base": "cannot_connect"})
+            return await self.async_step_captcha()
+        except BololoRateLimitError:
+            return await self.async_step_sms(_errors={"base": "sms_rate_limit"})
+        except BololoError:
+            return await self.async_step_sms(_errors={"base": "cannot_connect"})
+        self._captcha = None
+        self._authenticated = False
+        return await self.async_step_sms()
+
+    async def async_step_captcha(self, user_input=None):
+        if self._captcha is None:
+            return await self.async_step_user()
+        if user_input is not None:
+            return await self._send_sms(user_input["captcha_code"].strip())
+        return self.async_show_form(
+            step_id="captcha",
+            data_schema=vol.Schema({vol.Required("captcha_code"): str}),
+            description_placeholders={"captcha_image": self._captcha["image"]},
+        )
+
+    async def async_step_sms(self, user_input=None, *, _errors=None):
+        errors = _errors or {}
+        if self._client is None:
+            return await self.async_step_user()
+        if user_input is not None:
+            if user_input.get("resend"):
+                return await self._send_sms()
+            code = user_input.get("code", "").strip()
+            if not code and not self._authenticated:
+                errors["base"] = "code_required"
+            else:
+                try:
+                    if not self._authenticated:
+                        await self._client.async_login_sms(code)
+                        self._authenticated = True
+                    return await self._finish()
+                except BololoAuthError:
+                    self._authenticated = False
+                    errors["base"] = "invalid_code"
+                except BololoError:
+                    errors["base"] = "cannot_connect"
+        return self.async_show_form(
+            step_id="sms",
+            data_schema=vol.Schema(
+                {vol.Optional("code"): str, vol.Optional("resend", default=False): bool}
             ),
             errors=errors,
         )

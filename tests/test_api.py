@@ -5,7 +5,7 @@ import importlib.util
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import aiohttp
 
@@ -254,6 +254,155 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(api.BololoError):
             await client.async_control(DEVICE, {})
         self.assertEqual(session.calls, [])
+
+
+class SmsApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_current_sms_code_token_and_v2_wire_format(self):
+        session = Session(success("code-token"), success(None))
+        client = api.BololoClient(session, username="13800138000")
+        await client.async_request_sms()
+        self.assertEqual([call[0] for call in session.calls], ["GET", "POST"])
+        self.assertTrue(session.calls[0][1].endswith("app/user/codeToken"))
+        self.assertNotIn("json", session.calls[0][2])
+        self.assertTrue(session.calls[1][1].endswith("app/user/v2/mobileCode"))
+        self.assertEqual(
+            session.calls[1][2]["json"]["data"],
+            {"mobile": "+8613800138000", "lang": "zh", "token": "code-token"},
+        )
+        for _, _, kwargs in session.calls:
+            self.assertNotIn("Authorization", kwargs["headers"])
+            self.assertFalse(kwargs["allow_redirects"])
+
+    async def test_missing_code_token_uses_legacy_route_without_guessing_token(self):
+        session = Session(success(None), success(None))
+        await api.BololoClient(session, username="13800138000").async_request_sms()
+        self.assertTrue(session.calls[1][1].endswith("app/user/mobileCode"))
+        self.assertNotIn("token", session.calls[1][2]["json"]["data"])
+
+    async def test_captcha_is_passed_as_headers_and_never_as_sms_body(self):
+        session = Session(success("code-token"), success(None))
+        await api.BololoClient(session, username="13800138000").async_request_sms(
+            "image-id", "ABCD"
+        )
+        kwargs = session.calls[1][2]
+        self.assertEqual(kwargs["headers"]["X-Gizwits-Captcha-Id"], "image-id")
+        self.assertEqual(kwargs["headers"]["X-Gizwits-Captcha-Code"], "ABCD")
+        self.assertNotIn("captchaCode", kwargs["json"]["data"])
+
+    async def test_sms_login_stores_session_without_storing_code_or_password(self):
+        saved = AsyncMock()
+        session = Session(success(login_data()))
+        client = api.BololoClient(
+            session, username="13800138000", mobile_country_code="CN", on_auth_update=saved
+        )
+        await client.async_login_sms("012345")
+        self.assertTrue(session.calls[0][1].endswith("app/user/loginByMobile"))
+        self.assertEqual(
+            session.calls[0][2]["json"]["data"],
+            {
+                "mobile": "+8613800138000",
+                "code": "012345",
+                "homeName": "我的家",
+                "mobileCountryCode": "CN",
+                "lang": "zh",
+            },
+        )
+        self.assertEqual(client.auth["refresh_token"], "refresh-1")
+        saved.assert_awaited_once_with(client.auth)
+        self.assertNotIn("012345", repr(vars(client)))
+        copy = client.auth
+        copy["token"] = "changed"
+        self.assertEqual(client.token, "new-token")
+
+    async def test_sms_restart_refreshes_saved_session_without_sms_or_password(self):
+        session = Session(
+            success(
+                {
+                    "token": "rotated",
+                    "refresh_token": "next",
+                    "created_at": 400,
+                    "expired_at": 1200,
+                    "uid": "account-1",
+                }
+            ),
+            success([DEVICE]),
+        )
+        saved = AsyncMock()
+        client = api.BololoClient(
+            session,
+            auth={
+                "token": "old",
+                "refresh_token": "refresh-1",
+                "created_at": 100,
+                "expired_at": 500,
+                "uid": "account-1",
+            },
+            on_auth_update=saved,
+        )
+        with patch.object(api.time, "time", return_value=400):
+            self.assertEqual(await client.async_get_devices(), [DEVICE])
+        self.assertEqual(len(session.calls), 2)
+        self.assertTrue(session.calls[0][1].endswith("app/user/refresh_token"))
+        self.assertEqual(session.calls[1][2]["headers"]["Authorization"], "rotated")
+        saved.assert_awaited_once()
+
+    async def test_rejected_sms_session_requires_user_reauth_and_sends_no_code(self):
+        session = Session(Response({"code": 526}))
+        client = api.BololoClient(
+            session,
+            auth={
+                "token": "old",
+                "refresh_token": "refresh-1",
+                "created_at": 100,
+                "expired_at": 500,
+            },
+        )
+        with patch.object(api.time, "time", return_value=400):
+            with self.assertRaises(api.BololoAuthError):
+                await client.async_get_devices()
+        self.assertEqual(len(session.calls), 1)
+        self.assertTrue(session.calls[0][1].endswith("refresh_token"))
+
+    async def test_persistence_failure_does_not_expose_rotated_token(self):
+        saved = AsyncMock(side_effect=api.BololoConnectionError("disk failed"))
+        session = Session(success({"token": "rotated", "refresh_token": "next"}))
+        client = api.BololoClient(
+            session,
+            auth={"token": "old", "refresh_token": "refresh-1", "expired_at": 100},
+            on_auth_update=saved,
+        )
+        with self.assertRaises(api.BololoConnectionError):
+            await client.async_get_devices()
+        self.assertEqual(client.token, "old")
+        self.assertEqual(len(session.calls), 1)
+
+    async def test_sms_errors_are_classified_and_redacted(self):
+        for code, expected in [
+            (610, api.BololoCaptchaRequired),
+            (612, api.BololoCaptchaRequired),
+            (1000018, api.BololoCaptchaRequired),
+            (8000005, api.BololoRateLimitError),
+            (53, api.BololoRateLimitError),
+            (1000034, api.BololoAuthError),
+            (1000035, api.BololoAuthError),
+        ]:
+            session = Session(Response({"code": code, "message": "private-otp"}))
+            with self.subTest(code=code), self.assertRaises(expected) as error:
+                await api.BololoClient(session, username="13800138000").async_login_sms("code")
+            self.assertNotIn("private-otp", str(error.exception))
+
+    async def test_captcha_image_alias_and_unsafe_content(self):
+        session = Session(
+            success({"id": "challenge", "imageBase64": "aW1hZ2U="}),
+            success({"id": "challenge", "image": "https://untrusted/image) [link](bad"}),
+        )
+        client = api.BololoClient(session)
+        self.assertEqual(
+            await client.async_get_captcha(),
+            {"id": "challenge", "image": "data:image/jpeg;base64,aW1hZ2U="},
+        )
+        with self.assertRaises(api.BololoError):
+            await client.async_get_captcha()
 
 
 if __name__ == "__main__":

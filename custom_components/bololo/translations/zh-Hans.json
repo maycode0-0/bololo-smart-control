@@ -4,18 +4,45 @@
     "step": {
       "user": {
         "title": "连接波咯咯",
-        "description": "填写波咯咯 App 的账号和密码，首次连接云端获取已绑定设备清单。默认优先使用局域网，失败时按需使用云端；以后可在选项中切换模式。",
+        "description": "填写 App 使用的手机号（不含国家区号），默认通过短信验证码登录；提交后将发送一次短信。也可选择密码登录。首次登录获取绑定设备，默认 LAN 优先。",
         "data": {
-          "username": "手机号或邮箱",
-          "password": "密码",
+          "username": "手机号（密码登录也支持邮箱）",
           "country_code": "手机国家区号",
-          "connection_mode": "连接模式"
+          "connection_mode": "连接模式",
+          "auth_method": "登录方式",
+          "mobile_country_code": "账号注册国家或地区"
+        }
+      },
+      "password": {
+        "title": "密码登录",
+        "data": {
+          "password": "密码"
+        }
+      },
+      "sms": {
+        "title": "短信验证码登录",
+        "description": "输入收到的短信验证码。验证码不保存。重发需勾选“重新发送”并提交，两次请求至少间隔 60 秒。若读取设备暂时失败，可再次提交以继续。",
+        "data": {
+          "code": "短信验证码",
+          "resend": "重新发送验证码"
+        }
+      },
+      "captcha": {
+        "title": "图形验证码",
+        "description": "请输入图片中的字符，再发送短信。\n\n![图形验证码]({captcha_image})",
+        "data": {
+          "captcha_code": "图形验证码"
         }
       }
     },
     "error": {
       "cannot_connect": "无法连接波咯咯云服务，请稍后重试。",
-      "invalid_auth": "账号、密码或国家区号验证失败。"
+      "invalid_auth": "账号、密码或国家区号验证失败。",
+      "invalid_account": "请填写有效的手机号和国家区号。",
+      "invalid_code": "验证码无效或已过期，请核对后重试，或重新发送。",
+      "code_required": "请输入短信验证码，或勾选重新发送。",
+      "sms_cooldown": "距离上次发码请求不足 60 秒，请稍后重试。",
+      "sms_rate_limit": "短信发送过于频繁，请稍后再试。"
     },
     "abort": {
       "already_configured": "此账号已添加。",
@@ -29,6 +56,12 @@
         "auto": "自动：局域网优先，云端备用",
         "cloud": "仅云端",
         "lan": "仅局域网"
+      }
+    },
+    "auth_method": {
+      "options": {
+        "sms": "短信验证码",
+        "password": "密码"
       }
     }
   },

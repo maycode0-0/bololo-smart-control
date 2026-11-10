@@ -10,7 +10,12 @@ from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.bololo.api import BololoAuthError, BololoConnectionError
+from custom_components.bololo.api import (
+    BololoAuthError,
+    BololoCaptchaRequired,
+    BololoConnectionError,
+    BololoRateLimitError,
+)
 from custom_components.bololo.config_flow import BololoConfigFlow
 from custom_components.bololo.const import DOMAIN
 from custom_components.bololo.coordinator import BololoCoordinator, DeviceState
@@ -198,6 +203,8 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         flow.flow_id = "test-flow"
         flow.context = {"source": source}
         if entry is not None:
+            if not hasattr(entry, "title"):
+                entry.title = "BOLOLO account"
             flow.context["entry_id"] = entry.entry_id
         flow.hass.config_entries.flow.async_progress_by_handler.return_value = []
         flow.hass.config_entries.async_entry_for_domain_unique_id.return_value = None
@@ -207,7 +214,10 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_user_flow_creates_one_account_entry(self):
         flow = self.make_flow()
         client = SimpleNamespace(
-            uid="account-id", async_login=AsyncMock(), async_get_devices=AsyncMock(return_value=[])
+            uid="account-id",
+            auth={"token": "test-session", "uid": "account-id"},
+            async_login=AsyncMock(),
+            async_get_devices=AsyncMock(return_value=[]),
         )
         with (
             patch("custom_components.bololo.config_flow.async_get_clientsession"),
@@ -241,7 +251,10 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         flow = self.make_flow("reauth", entry)
         client = SimpleNamespace(
-            uid="account-id", async_login=AsyncMock(), async_get_devices=AsyncMock(return_value=[])
+            uid="account-id",
+            auth={"token": "test-session", "uid": "account-id"},
+            async_login=AsyncMock(),
+            async_get_devices=AsyncMock(return_value=[]),
         )
         with (
             patch("custom_components.bololo.config_flow.async_get_clientsession"),
@@ -262,6 +275,7 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         flow = self.make_flow("reauth", entry)
         client = SimpleNamespace(
             uid="different-id",
+            auth={"token": "test-session", "uid": "different-id"},
             async_login=AsyncMock(),
             async_get_devices=AsyncMock(return_value=[]),
         )
@@ -274,6 +288,134 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
                     {"username": "other", "password": "secret", "country_code": "86"}
                 )
         self.assertEqual(context.exception.reason, "unique_id_mismatch")
+
+    def sms_client(self):
+        return SimpleNamespace(
+            uid="account-id",
+            auth={"token": "session", "refresh_token": "refresh", "uid": "account-id"},
+            async_request_sms=AsyncMock(),
+            async_login_sms=AsyncMock(),
+            async_get_devices=AsyncMock(return_value=[]),
+            async_get_captcha=AsyncMock(
+                return_value={"id": "image-id", "image": "data:image/jpeg;base64,aW1hZ2U="}
+            ),
+        )
+
+    async def start_sms(self, flow, client):
+        with (
+            patch("custom_components.bololo.config_flow.async_get_clientsession"),
+            patch("custom_components.bololo.config_flow.BololoClient", return_value=client),
+        ):
+            return await flow.async_step_user(
+                {
+                    "username": "13800138000",
+                    "country_code": "86",
+                    "mobile_country_code": "CN",
+                    "auth_method": "sms",
+                }
+            )
+
+    async def test_showing_default_sms_form_does_not_send_message(self):
+        flow = self.make_flow()
+        with patch("custom_components.bololo.config_flow.BololoClient") as constructor:
+            result = await flow.async_step_user()
+        self.assertEqual(result["step_id"], "user")
+        constructor.assert_not_called()
+        validated = result["data_schema"]({"username": "13800138000"})
+        self.assertEqual(validated["auth_method"], "sms")
+        self.assertEqual(validated["mobile_country_code"], "CN")
+
+    async def test_sms_flow_explicit_send_then_create_without_otp(self):
+        flow, client = self.make_flow(), self.sms_client()
+        result = await self.start_sms(flow, client)
+        self.assertEqual(result["step_id"], "sms")
+        client.async_request_sms.assert_awaited_once_with(None, None)
+        result = await flow.async_step_sms({"code": "012345"})
+        self.assertEqual(result["type"], "create_entry")
+        client.async_login_sms.assert_awaited_once_with("012345")
+        self.assertEqual(result["data"]["auth"], client.auth)
+        self.assertEqual(result["data"]["auth_method"], "sms")
+        self.assertNotIn("password", result["data"])
+        self.assertNotIn("012345", repr(result["data"]))
+
+    async def test_invalid_otp_never_resends_and_can_be_retried(self):
+        flow, client = self.make_flow(), self.sms_client()
+        await self.start_sms(flow, client)
+        client.async_login_sms.side_effect = [BololoAuthError("invalid"), None]
+        result = await flow.async_step_sms({"code": "bad"})
+        self.assertEqual(result["errors"], {"base": "invalid_code"})
+        result = await flow.async_step_sms({"code": "new"})
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(client.async_request_sms.await_count, 1)
+
+    async def test_device_fetch_retry_does_not_reuse_consumed_otp(self):
+        flow, client = self.make_flow(), self.sms_client()
+        await self.start_sms(flow, client)
+        client.async_get_devices.side_effect = [BololoConnectionError("timeout"), []]
+        result = await flow.async_step_sms({"code": "012345"})
+        self.assertEqual(result["errors"], {"base": "cannot_connect"})
+        result = await flow.async_step_sms({})
+        self.assertEqual(result["type"], "create_entry")
+        client.async_login_sms.assert_awaited_once()
+
+    async def test_explicit_resend_obeys_cooldown_even_after_timeout(self):
+        flow, client = self.make_flow(), self.sms_client()
+        client.async_request_sms.side_effect = BololoConnectionError("timeout")
+        with patch("custom_components.bololo.config_flow.time.monotonic", return_value=100):
+            await self.start_sms(flow, client)
+            result = await flow.async_step_sms({"resend": True})
+        self.assertEqual(result["errors"], {"base": "sms_cooldown"})
+        self.assertEqual(client.async_request_sms.await_count, 1)
+        client.async_request_sms.side_effect = None
+        with patch("custom_components.bololo.config_flow.time.monotonic", return_value=161):
+            result = await flow.async_step_sms({"resend": True})
+        self.assertEqual(result["step_id"], "sms")
+        self.assertEqual(client.async_request_sms.await_count, 2)
+
+    async def test_rate_limit_and_human_captcha_paths(self):
+        flow, client = self.make_flow(), self.sms_client()
+        client.async_request_sms.side_effect = [BololoCaptchaRequired("challenge"), None]
+        result = await self.start_sms(flow, client)
+        self.assertEqual(result["step_id"], "captcha")
+        self.assertIn("data:image/", result["description_placeholders"]["captcha_image"])
+        client.async_login_sms.assert_not_awaited()
+        result = await flow.async_step_captcha({"captcha_code": "ABCD"})
+        self.assertEqual(result["step_id"], "sms")
+        client.async_request_sms.assert_awaited_with("image-id", "ABCD")
+        flow, client = self.make_flow(), self.sms_client()
+        client.async_request_sms.side_effect = BololoRateLimitError("limited")
+        result = await self.start_sms(flow, client)
+        self.assertEqual(result["errors"], {"base": "sms_rate_limit"})
+
+    async def test_sms_reauth_removes_old_password_and_keeps_lan_options(self):
+        entry = SimpleNamespace(
+            entry_id="entry-1",
+            unique_id="account-id",
+            data={
+                "username": "13800138000",
+                "password": "old",
+                "country_code": "86",
+                "connection_mode": "lan",
+                "other": "kept",
+            },
+        )
+        flow, client = self.make_flow("reauth", entry), self.sms_client()
+        await self.start_sms(flow, client)
+        result = await flow.async_step_sms({"code": "012345"})
+        self.assertEqual(result["reason"], "reauth_successful")
+        data = flow.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        self.assertNotIn("password", data)
+        self.assertEqual(data["connection_mode"], "lan")
+        self.assertEqual(data["other"], "kept")
+
+    async def test_sms_reauth_cannot_switch_accounts(self):
+        entry = SimpleNamespace(entry_id="entry-1", unique_id="original", data={})
+        flow, client = self.make_flow("reauth", entry), self.sms_client()
+        await self.start_sms(flow, client)
+        with self.assertRaises(AbortFlow) as error:
+            await flow.async_step_sms({"code": "012345"})
+        self.assertEqual(error.exception.reason, "unique_id_mismatch")
+        flow.hass.config_entries.async_update_entry.assert_not_called()
 
 
 if __name__ == "__main__":
