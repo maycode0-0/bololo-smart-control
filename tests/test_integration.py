@@ -199,6 +199,7 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
     def make_flow(self, source="user", entry=None):
         flow = BololoConfigFlow()
         flow.hass = MagicMock()
+        flow.hass.data = {"http.auth": "test-flow-refresh-id"}
         flow.handler = DOMAIN
         flow.flow_id = "test-flow"
         flow.context = {"source": source}
@@ -338,6 +339,15 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("password", result["data"])
         self.assertNotIn("012345", repr(result["data"]))
 
+    async def test_entered_code_is_verified_even_if_resend_checkbox_remains_checked(self):
+        flow, client = self.make_flow(), self.sms_client()
+        await self.start_sms(flow, client)
+        flow._sent_at = float("-inf")
+        result = await flow.async_step_sms({"code": "123456", "resend": True})
+        self.assertEqual(result["type"], "create_entry")
+        client.async_login_sms.assert_awaited_once_with("123456")
+        self.assertEqual(client.async_request_sms.await_count, 1)
+
     async def test_invalid_otp_never_resends_and_can_be_retried(self):
         flow, client = self.make_flow(), self.sms_client()
         await self.start_sms(flow, client)
@@ -377,7 +387,7 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         client.async_request_sms.side_effect = [BololoCaptchaRequired("challenge"), None]
         result = await self.start_sms(flow, client)
         self.assertEqual(result["step_id"], "captcha")
-        self.assertIn("data:image/", result["description_placeholders"]["captcha_image"])
+        self.assertIn("/api/bololo/captcha/", result["description_placeholders"]["captcha_image"])
         client.async_login_sms.assert_not_awaited()
         result = await flow.async_step_captcha({"captcha_code": "ABCD"})
         self.assertEqual(result["step_id"], "sms")
@@ -386,6 +396,29 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         client.async_request_sms.side_effect = BololoRateLimitError("limited")
         result = await self.start_sms(flow, client)
         self.assertEqual(result["errors"], {"base": "sms_rate_limit"})
+
+    async def test_invalid_and_expired_captcha_show_error_with_new_image(self):
+        for code, error in [(1000018, "invalid_captcha"), (612, "expired_captcha")]:
+            flow, client = self.make_flow(), self.sms_client()
+            client.async_request_sms.side_effect = [
+                BololoCaptchaRequired("challenge", code=610),
+                BololoCaptchaRequired("rejected", code=code),
+            ]
+            first = await self.start_sms(flow, client)
+            first_image = first["description_placeholders"]["captcha_image"]
+            result = await flow.async_step_captcha({"captcha_code": "wrong"})
+            self.assertEqual(result["step_id"], "captcha")
+            self.assertEqual(result["errors"], {"base": error})
+            self.assertNotEqual(result["description_placeholders"]["captcha_image"], first_image)
+            self.assertEqual(client.async_get_captcha.await_count, 2)
+
+    async def test_blank_image_code_does_not_trigger_another_sms_request(self):
+        flow, client = self.make_flow(), self.sms_client()
+        client.async_request_sms.side_effect = BololoCaptchaRequired("challenge", code=610)
+        await self.start_sms(flow, client)
+        result = await flow.async_step_captcha({"captcha_code": " "})
+        self.assertEqual(result["errors"], {"base": "captcha_required"})
+        client.async_request_sms.assert_awaited_once()
 
     async def test_sms_reauth_removes_old_password_and_keeps_lan_options(self):
         entry = SimpleNamespace(

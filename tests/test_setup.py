@@ -8,7 +8,7 @@ from types import MappingProxyType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-from homeassistant import loader
+from homeassistant import auth, loader
 from homeassistant.config_entries import ConfigEntries, ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -45,6 +45,7 @@ class FullSetupTests(unittest.IsolatedAsyncioTestCase):
             hass.config_entries = ConfigEntries(hass, {})
             await er.async_load(hass)
             await dr.async_load(hass)
+            hass.auth = await auth.auth_manager_from_config(hass, [], [])
             entry = ConfigEntry(
                 domain=DOMAIN,
                 title="Test BOLOLO account",

@@ -1,22 +1,23 @@
 # BOLOLO Smart Control
 
-[![Version](https://img.shields.io/badge/version-0.1.2-2f6f4e.svg)](custom_components/bololo/manifest.json)
+[![Version](https://img.shields.io/badge/version-0.1.3-2f6f4e.svg)](custom_components/bololo/manifest.json)
 [![Release workflow](https://github.com/maycode0-0/bololo-smart-control/actions/workflows/hacs-release.yml/badge.svg)](https://github.com/maycode0-0/bololo-smart-control/actions/workflows/hacs-release.yml)
 
 BOLOLO Smart Control 是面向 Home Assistant 的波咯咯自定义集成。它将云端账号、
 设备清单和局域网通信放在同一条设备、状态与控制链路中，默认优先使用 LAN，
 无法通过本地通道处理的请求按回退规则交给云端。
 
-## v0.1.2
+## v0.1.3
 
-本版新增 **短信验证码登录**，无需先设置 App 密码。会话保存并自动续期，失效后由 HA
+本版修复 **图形验证码图片不显示**，使用 HA 的短时签名图片链接；图形验证码错误或过期会明确提示。
+支持 **短信验证码登录**，无需先设置 App 密码。会话保存并自动续期，失效后由 HA
 提示重新验证。继续以 **LAN 优先、云端回退** 为默认传输策略，并提供仅云端、仅 LAN 两种模式。
 设备实体保持在同一个集成下，切换通道无需建立另一组设备。
 
 重点适配刘海妹妹全能 Z60 系列消毒柜与智能泡奶机 P30。设备字段和控制约束来自
 波咯咯 Android App 2.1.86 及其绑定的官方设备页面；静态协议分析、离线测试和真机
 验证分别记录。当前尚未完成这两款设备的真机联调，具体固件的 LAN 能力仍需验证。
-具体变更见 [v0.1.2 发布说明](docs/releases/0.1.2.md)。
+具体变更见 [v0.1.3 发布说明](docs/releases/0.1.3.md)。
 
 ## 通道策略
 
@@ -66,7 +67,7 @@ Home Assistant 的私有 Store 中。已有缓存后，默认模式启动不强�
 
 ### 安装包
 
-1. 将 `dist/bololo-0.1.2.zip` 解压到 Home Assistant 配置目录。
+1. 将 `dist/bololo-0.1.3.zip` 解压到 Home Assistant 配置目录。
 2. 确认最终文件路径如下，然后重启 Home Assistant：
 
 ```text
@@ -99,7 +100,12 @@ Home Assistant 的私有 Store 中。已有缓存后，默认模式启动不强�
 ### 验证码与会话
 
 只有提交手机号或显式勾选“重新发送”并提交时才发码；不会在启动、轮询或续期时自动发送短信。
-重发请求至少间隔 60 秒；云端另有限流，超时也不会自动重发。验证码仅用于当次认证，不写入配置或 Store。
+有验证码时提交会优先验证；需重发时先清空验证码，再勾选重新发送。重发请求至少间隔 60 秒；
+云端另有限流，超时也不会自动重发。验证码仅用于当次认证，不写入配置或 Store。
+
+图形验证码步骤需填写图片中的字符，通过后才发送短信。图片保存在 HA 内存中，使用 5 分钟有效的
+签名链接并要求 HA 认证，不写入公开 www 目录。升级后若仍显示英文 `captcha_code`，请重启 HA 并
+强制刷新浏览器或使用无痕窗口；v0.1.2 的图片不可见问题需升级到 v0.1.3 才能解决。
 
 登录令牌和续期令牌保存在 HA 私有配置与认证 Store 中；续期轮换后先保存再继续使用。
 重启通常无需重复收码。服务器拒绝续期时，HA 提示重新认证，请登录原账号；重新认证不会更换实体。

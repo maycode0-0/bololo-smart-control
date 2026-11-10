@@ -21,7 +21,7 @@
       },
       "sms": {
         "title": "Verify SMS code",
-        "description": "Enter the code from your SMS. The code is never stored. To request another code, select Resend and submit; wait at least 60 seconds between requests. If retrieving devices fails temporarily, submit again to continue.",
+        "description": "Enter your SMS code and submit. A supplied code is always verified. To resend, clear the code, select Resend and submit; wait at least 60 seconds between requests. If retrieving devices fails temporarily, submit again to continue.",
         "data": {
           "code": "SMS verification code",
           "resend": "Resend code"
@@ -29,7 +29,7 @@
       },
       "captcha": {
         "title": "Image verification",
-        "description": "Enter the characters in the image to request your SMS code.\n\n![Verification image]({captcha_image})",
+        "description": "Enter the characters in the image, not an SMS code. SMS is requested after image verification. The image and link expire after 5 minutes; restart setup if expired.\n\n![Verification image]({captcha_image})",
         "data": {
           "captcha_code": "Characters in the image"
         }
@@ -42,7 +42,10 @@
       "invalid_code": "The code was rejected or expired. Check it or request another code.",
       "code_required": "Enter your SMS code or select Resend.",
       "sms_cooldown": "Wait at least 60 seconds after the previous SMS request.",
-      "sms_rate_limit": "SMS requests are rate limited. Try again later."
+      "sms_rate_limit": "SMS requests are rate limited. Try again later.",
+      "invalid_captcha": "The image code was rejected. Enter the characters from the new image.",
+      "expired_captcha": "The image code expired. Enter the characters from the new image.",
+      "captcha_required": "Enter the characters in the image."
     },
     "abort": {
       "already_configured": "This account is already configured.",

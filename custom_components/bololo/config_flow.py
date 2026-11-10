@@ -19,6 +19,7 @@ from .api import (
     BololoError,
     BololoRateLimitError,
 )
+from .captcha import async_captcha_images
 from .const import (
     CONF_CONNECTION_MODE,
     CONF_COUNTRY_CODE,
@@ -58,6 +59,8 @@ class BololoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._captcha = None
         self._sent_at = float("-inf")
         self._authenticated = False
+        self._captcha_image_id = None
+        self._captcha_url = None
 
     def _defaults(self):
         if self.source == config_entries.SOURCE_REAUTH:
@@ -182,30 +185,47 @@ class BololoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self._client.async_request_sms(
                 self._captcha["id"] if self._captcha else None, captcha_code
             )
-        except BololoCaptchaRequired:
+        except BololoCaptchaRequired as err:
             self._sent_at = float("-inf")
             try:
                 self._captcha = await self._client.async_get_captcha()
-            except BololoError:
+                images = async_captcha_images(self.hass)
+                if self._captcha_image_id is not None:
+                    images.remove(self._captcha_image_id)
+                self._captcha_image_id, self._captcha_url = images.add(self._captcha["image"])
+            except (BololoError, ValueError):
                 return await self.async_step_sms(_errors={"base": "cannot_connect"})
-            return await self.async_step_captcha()
+            error = {1000018: "invalid_captcha", 612: "expired_captcha"}.get(err.code)
+            return await self.async_step_captcha(_errors={"base": error} if error else None)
         except BololoRateLimitError:
             return await self.async_step_sms(_errors={"base": "sms_rate_limit"})
         except BololoError:
             return await self.async_step_sms(_errors={"base": "cannot_connect"})
-        self._captcha = None
+        self._clear_captcha()
         self._authenticated = False
         return await self.async_step_sms()
 
-    async def async_step_captcha(self, user_input=None):
+    def _clear_captcha(self):
+        if self._captcha_image_id is not None:
+            async_captcha_images(self.hass).remove(self._captcha_image_id)
+        self._captcha_image_id = None
+        self._captcha_url = None
+        self._captcha = None
+
+    async def async_step_captcha(self, user_input=None, *, _errors=None):
         if self._captcha is None:
             return await self.async_step_user()
+        errors = _errors or {}
         if user_input is not None:
-            return await self._send_sms(user_input["captcha_code"].strip())
+            code = user_input["captcha_code"].strip()
+            if code:
+                return await self._send_sms(code)
+            errors["base"] = "captcha_required"
         return self.async_show_form(
             step_id="captcha",
             data_schema=vol.Schema({vol.Required("captcha_code"): str}),
-            description_placeholders={"captcha_image": self._captcha["image"]},
+            description_placeholders={"captcha_image": self._captcha_url},
+            errors=errors,
         )
 
     async def async_step_sms(self, user_input=None, *, _errors=None):
@@ -213,9 +233,11 @@ class BololoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._client is None:
             return await self.async_step_user()
         if user_input is not None:
-            if user_input.get("resend"):
-                return await self._send_sms()
             code = user_input.get("code", "").strip()
+            # HA may keep the checkbox checked when the same form is shown again.
+            # A supplied code must be verified, never invalidated by another send.
+            if user_input.get("resend") and not code:
+                return await self._send_sms()
             if not code and not self._authenticated:
                 errors["base"] = "code_required"
             else:

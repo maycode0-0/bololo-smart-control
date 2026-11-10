@@ -36,6 +36,10 @@ class BololoAuthError(BololoError):
 class BololoCaptchaRequired(BololoError):
     """The SMS endpoint requires a human-entered image challenge."""
 
+    def __init__(self, message: str, *, code: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class BololoRateLimitError(BololoError):
     """The server declined another SMS request."""
@@ -373,7 +377,7 @@ class BololoClient:
             code = 0
         if code != 200:
             if code in {610, 612, 1000018}:
-                raise BololoCaptchaRequired("An image verification is required")
+                raise BololoCaptchaRequired("An image verification is required", code=code)
             if (
                 code in {53, 8000005}
                 or payload.get("message") == "yunpian send sms response error: code = 8"
