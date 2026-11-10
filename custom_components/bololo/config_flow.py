@@ -19,6 +19,7 @@ from .api import (
     BololoError,
     BololoRateLimitError,
 )
+from .bottle import BottleOptionsMixin
 from .captcha import async_captcha_images
 from .const import (
     CONF_CONNECTION_MODE,
@@ -263,7 +264,7 @@ class BololoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_user()
 
 
-class BololoOptionsFlow(config_entries.OptionsFlow):
+class BololoOptionsFlow(BottleOptionsMixin, config_entries.OptionsFlow):
     """Choose routing and optionally override one known device's LAN address."""
 
     async def async_step_init(self, user_input=None):
@@ -278,6 +279,8 @@ class BololoOptionsFlow(config_entries.OptionsFlow):
             CONF_CONNECTION_MODE, entry.data.get(CONF_CONNECTION_MODE, DEFAULT_CONNECTION_MODE)
         )
         if user_input is not None:
+            if user_input.get("add_bottle"):
+                return await self.async_step_add_bottle()
             self._options = dict(entry.options)
             self._options[CONF_CONNECTION_MODE] = user_input[CONF_CONNECTION_MODE]
             self._selected = user_input.get("device")
@@ -285,6 +288,7 @@ class BololoOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_device()
             return self.async_create_entry(title="", data=self._options)
         fields = {vol.Required(CONF_CONNECTION_MODE, default=mode): _mode_selector()}
+        fields[vol.Optional("add_bottle", default=False)] = bool
         if self._devices:
             fields[vol.Optional("device")] = selector.SelectSelector(
                 selector.SelectSelectorConfig(

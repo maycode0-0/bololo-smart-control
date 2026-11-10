@@ -75,7 +75,8 @@
         "description": "选择连接模式。需要手动指定局域网地址或覆盖本地认证码时，可选择一台设备。仅局域网模式使用缓存清单，不刷新云端设备绑定关系。",
         "data": {
           "connection_mode": "连接模式",
-          "device": "配置局域网设备（可选）"
+          "device": "配置局域网设备（可选）",
+          "add_bottle": "添加奶瓶（需现场操作）"
         }
       },
       "device": {
@@ -85,10 +86,75 @@
           "host": "IPv4 地址（可选）",
           "passcode": "本地认证码（可选）"
         }
+      },
+      "add_bottle": {
+        "title": "添加奶瓶",
+        "description": "选择 P30 设备。请保持设备开机，并在设备旁完成称重步骤。保存奶瓶需要访问云端。",
+        "data": {
+          "device": "设备"
+        }
+      },
+      "bottle_details": {
+        "title": "奶瓶信息",
+        "description": "选择已在波咯咯 App 创建的宝宝，填写 1–7 字奶瓶名称。提交后设备将进入奶瓶标记流程。",
+        "data": {
+          "baby": "宝宝",
+          "name": "奶瓶名称",
+          "cancel": "取消"
+        }
+      },
+      "bottle_empty_tray": {
+        "title": "清空称重托盘",
+        "description": "请移走接水盘上的所有物品，确认清空后再勾选并提交，设备将完成托盘去皮。取消将重置奶瓶标记。",
+        "data": {
+          "confirm": "已清空接水盘",
+          "cancel": "取消并重置标记"
+        }
+      },
+      "bottle_place": {
+        "title": "放置空奶瓶",
+        "description": "请将空奶瓶放在接水盘上并保持静止，勾选确认后提交，设备将称重并标记奶瓶。请勿使用装有水的奶瓶。",
+        "data": {
+          "confirm": "已放好空奶瓶",
+          "cancel": "取消并重置标记"
+        }
+      },
+      "bottle_result": {
+        "title": "读取标记结果",
+        "description": "等待设备完成标记后，勾选确认并提交以读取结果。再次查询只读取状态，不会重复称重。标记失败时请取消后重新开始。",
+        "data": {
+          "confirm": "查询标记结果",
+          "cancel": "取消并重置标记"
+        }
+      },
+      "bottle_save": {
+        "title": "保存奶瓶 {name}",
+        "description": "设备已分配奶瓶编号 {number}。勾选确认并提交，将奶瓶保存到所选宝宝名下。自动解童锁设置保持原样。保存失败时，请先在波咯咯 App 核对，再重新开始。",
+        "data": {
+          "confirm": "保存此奶瓶",
+          "cancel": "取消并重置标记"
+        }
       }
     },
     "error": {
-      "invalid_host": "请输入有效的 IPv4 地址。"
+      "invalid_host": "请输入有效的 IPv4 地址。",
+      "bottle_invalid_device": "请选择可用的 P30 设备。",
+      "bottle_cannot_connect": "无法读取波咯咯数据，请检查连接后重试。",
+      "bottle_invalid_name": "请填写 1–7 字奶瓶名称。",
+      "bottle_invalid_baby": "请从列表选择宝宝。",
+      "bottle_reset_pending": "设备尚未确认清除上次奶瓶编号，请稍候再次提交。",
+      "bottle_registration_rejected": "设备拒绝标记（重量重复或奶瓶数量达到上限），请取消并在波咯咯 App 检查。",
+      "bottle_too_light": "未检测到奶瓶或奶瓶过轻，请取消后更换空奶瓶重试。",
+      "bottle_result_pending": "设备尚未返回有效奶瓶编号和重量，请稍候再次查询。",
+      "bottle_save_unknown": "尚未确认保存结果，为避免重复添加，不会再次发送。请在波咯咯 App 核对，然后取消以重置设备。"
+    },
+    "abort": {
+      "bottle_integration_unavailable": "请先加载波咯咯集成，再添加奶瓶。",
+      "bottle_cloud_required": "保存奶瓶需要访问云端，请先切换为自动或仅云端模式。",
+      "bottle_no_device": "未找到可用的 P30 设备。",
+      "bottle_no_baby": "请先在波咯咯 App 创建宝宝，再添加奶瓶。",
+      "bottle_reset_failed": "未确认设备已重置，请在设备或波咯咯 App 检查奶瓶标记状态。",
+      "bottle_command_uncertain": "设备命令结果未确认，未重复发送。请在设备或波咯咯 App 核对后再重新开始标记。"
     }
   }
 }

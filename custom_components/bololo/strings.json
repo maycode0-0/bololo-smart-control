@@ -75,7 +75,8 @@
         "description": "Choose a connection mode. Optionally select a device to override its LAN address or passcode. LAN-only mode uses the cached inventory without refreshing cloud account bindings.",
         "data": {
           "connection_mode": "Connection mode",
-          "device": "Configure LAN device (optional)"
+          "device": "Configure LAN device (optional)",
+          "add_bottle": "Add a bottle (requires in-person weighing)"
         }
       },
       "device": {
@@ -85,10 +86,75 @@
           "host": "IPv4 address (optional)",
           "passcode": "Local passcode (optional)"
         }
+      },
+      "add_bottle": {
+        "title": "Add a bottle",
+        "description": "Choose a P30 device. Keep the device powered on and stay beside it to complete weighing. Cloud access is required to save the bottle.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "bottle_details": {
+        "title": "Bottle details",
+        "description": "Choose a baby already created in the BOLOLO app and enter a bottle name (1–7 characters). Submitting starts bottle marking on the device.",
+        "data": {
+          "baby": "Baby",
+          "name": "Bottle name",
+          "cancel": "Cancel"
+        }
+      },
+      "bottle_empty_tray": {
+        "title": "Empty the weighing tray",
+        "description": "Remove all objects from the water tray. Only select Confirm once the tray is empty. The device will tare the tray. Cancel resets bottle marking.",
+        "data": {
+          "confirm": "The tray is empty",
+          "cancel": "Cancel and reset"
+        }
+      },
+      "bottle_place": {
+        "title": "Place an empty bottle",
+        "description": "Place an empty bottle on the tray and keep it still. Select Confirm to measure and mark the bottle. Do not use a bottle containing water.",
+        "data": {
+          "confirm": "The empty bottle is on the tray",
+          "cancel": "Cancel and reset"
+        }
+      },
+      "bottle_result": {
+        "title": "Read the bottle result",
+        "description": "Wait for the device to finish marking, then select Confirm to check its result. Checking again only reads status and does not repeat weighing. For a failed marking, cancel and start again.",
+        "data": {
+          "confirm": "Check the result",
+          "cancel": "Cancel and reset"
+        }
+      },
+      "bottle_save": {
+        "title": "Save bottle {name}",
+        "description": "The device assigned bottle number {number}. Select Confirm to save this bottle to the selected baby. Automatic child-lock unlocking keeps its current setting. If saving fails, check the BOLOLO app before starting again.",
+        "data": {
+          "confirm": "Save this bottle",
+          "cancel": "Cancel and reset"
+        }
       }
     },
     "error": {
-      "invalid_host": "Enter a valid IPv4 address."
+      "invalid_host": "Enter a valid IPv4 address.",
+      "bottle_invalid_device": "Select an available supported P30 device.",
+      "bottle_cannot_connect": "Unable to read BOLOLO data. Check the connection and try again.",
+      "bottle_invalid_name": "Enter a bottle name of 1–7 characters.",
+      "bottle_invalid_baby": "Choose a baby from the list.",
+      "bottle_reset_pending": "The device has not confirmed clearing its previous bottle number. Wait, then submit again.",
+      "bottle_registration_rejected": "The device rejected marking (duplicate weight or bottle limit). Cancel and check the BOLOLO app.",
+      "bottle_too_light": "No bottle was detected, or it was too light. Cancel and try another empty bottle.",
+      "bottle_result_pending": "The device has not returned a valid bottle number and weight. Wait, then check again.",
+      "bottle_save_unknown": "Saving was not confirmed and will not be sent again. Check the BOLOLO app, then cancel to reset the device."
+    },
+    "abort": {
+      "bottle_integration_unavailable": "Load the BOLOLO integration before adding a bottle.",
+      "bottle_cloud_required": "Bottle saving requires cloud access. Switch to Automatic or Cloud only mode first.",
+      "bottle_no_device": "No available supported P30 device was found.",
+      "bottle_no_baby": "Create a baby in the BOLOLO app before adding a bottle.",
+      "bottle_reset_failed": "The device reset was not confirmed. Check bottle marking on the device or in the BOLOLO app.",
+      "bottle_command_uncertain": "The device command was not confirmed and was not repeated. Check the device or BOLOLO app before restarting bottle marking."
     }
   }
 }

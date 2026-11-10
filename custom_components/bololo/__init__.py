@@ -15,6 +15,7 @@ from homeassistant.util import json as json_util
 from homeassistant.util.file import WriteError
 
 from .api import BololoAuthError, BololoClient, BololoConnectionError, BololoError
+from .cloud_history import CloudHistoryManager
 from .const import (
     CONF_CONNECTION_MODE,
     CONF_COUNTRY_CODE,
@@ -26,6 +27,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import BololoCoordinator
+from .history import HistoryStore
 from .inventory import minimal_inventory
 from .schema import load_products
 from .transport import HybridClient
@@ -193,6 +195,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         products = await hass.async_add_executor_job(load_products)
         lan = _create_lan_client(products, entry.options) if mode != "cloud" else None
         client = HybridClient(cloud, lan, mode=mode, cached_devices=cached)
+        history_store = HistoryStore(hass, 1, f"{DOMAIN}.{entry.entry_id}.history", private=True)
+        saved_history = await history_store.async_load()
+        cloud_history = CloudHistoryManager(
+            hass, HistoryStore(hass, 1, f"{DOMAIN}.{entry.entry_id}.cloud_history", private=True)
+        )
+        await cloud_history.async_load()
         coordinator = BololoCoordinator(
             hass,
             entry,
@@ -201,6 +209,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             inventory_store=store,
             saved_inventory=cached if has_stored_inventory else None,
             auth_session=auth_session,
+            history_store=history_store,
+            saved_history=saved_history.get("devices") if isinstance(saved_history, dict) else None,
+            cloud_history=cloud_history,
         )
         await coordinator.async_config_entry_first_refresh()
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

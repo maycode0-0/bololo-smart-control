@@ -318,6 +318,57 @@ class BololoClient:
             raise BololoError("Invalid device status response")
         return data
 
+    async def async_get_babies(self, device: dict[str, Any]) -> list[dict[str, Any]]:
+        """List babies belonging to this device's family (App module 3754)."""
+        data = await self._read("GET", "bololo/app/baby/" + self._device_path(device))
+        return self._object_list(data)
+
+    async def async_get_bottles(self, device: dict[str, Any]) -> list[dict[str, Any]]:
+        """List registered bottles without changing the selected baby."""
+        data = await self._read("GET", "bololo/app/bottle/" + self._device_path(device))
+        return self._object_list(data)
+
+    @staticmethod
+    def _object_list(data: Any) -> list[dict[str, Any]]:
+        if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
+            raise BololoError("Invalid list response")
+        return data
+
+    async def async_create_bottle(self, payload: dict[str, Any]) -> None:
+        """Save once; an uncertain POST must never be replayed automatically."""
+        await self.async_ensure_authenticated()
+        await self._raw_request("POST", "bololo/app/bottle", payload)
+
+    async def async_get_water_history(
+        self,
+        device: dict[str, Any],
+        *,
+        current: int = 1,
+        size: int = 100,
+        start_time: int = 0,
+        end_time: int,
+    ) -> dict[str, Any]:
+        """Query all dispensing records, type 3 in the official P30 history screen."""
+        serial = device.get("sno")
+        if isinstance(serial, bool) or not isinstance(serial, (str, int)) or str(serial) == "":
+            raise BololoError("Device is missing sno for cloud history")
+        data = await self._read(
+            "POST",
+            "bololo/appdataSata/foam/detail/" + quote(str(serial), safe="") + "/3",
+            {
+                "current": current,
+                "size": size,
+                "query": {"startTime": start_time, "endTime": end_time},
+            },
+        )
+        if not isinstance(data, dict):
+            raise BololoError("Invalid history response")
+        self._object_list(data.get("records"))
+        total = data.get("total")
+        if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+            raise BololoError("Invalid history total")
+        return data
+
     async def async_control(self, device: dict[str, Any], attrs: dict[str, Any]) -> None:
         """Send once only: a timed-out physical command must not be replayed."""
         if not isinstance(attrs, dict) or not attrs:

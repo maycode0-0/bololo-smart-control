@@ -66,6 +66,49 @@ DEVICE = {"mac": "AA:BB", "productKey": "product-1", "sno": "serial-1"}
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_water_history_uses_current_wrapped_api_type_and_pagination(self):
+        data = {"records": [{"id": 1, "date": 123, "data": '{"waterOutput":120}'}], "total": 1}
+        session = Session(success(data))
+        client = api.BololoClient(session, token="token")
+        self.assertEqual(
+            await client.async_get_water_history(
+                DEVICE, current=2, size=50, start_time=100, end_time=200
+            ),
+            data,
+        )
+        method, url, kwargs = session.calls[0]
+        self.assertEqual(method, "POST")
+        self.assertTrue(url.endswith("bololo/appdataSata/foam/detail/serial-1/3"))
+        self.assertEqual(
+            kwargs["json"]["data"],
+            {"current": 2, "size": 50, "query": {"startTime": 100, "endTime": 200}},
+        )
+
+    async def test_bottle_cloud_contract_is_an_object_and_never_replays_post(self):
+        payload = {"name": "奶瓶1", "icon": "", "babyId": 1, "num": 2, "bottleWeight": 1200}
+        session = Session(success([{"id": 1}]), success([]), success(None))
+        client = api.BololoClient(session, token="token")
+        self.assertEqual(await client.async_get_babies(DEVICE), [{"id": 1}])
+        self.assertEqual(await client.async_get_bottles(DEVICE), [])
+        await client.async_create_bottle(payload)
+        self.assertTrue(session.calls[0][1].endswith("bololo/app/baby/product-1/AA%3ABB"))
+        self.assertTrue(session.calls[1][1].endswith("bololo/app/bottle/product-1/AA%3ABB"))
+        self.assertEqual(session.calls[2][2]["json"]["data"], payload)
+        for error in (asyncio.TimeoutError(), api.BololoAuthError("expired")):
+            session = Session(error)
+            with self.assertRaises(api.BololoError):
+                await api.BololoClient(session, token="token").async_create_bottle(payload)
+            self.assertEqual(len(session.calls), 1)
+
+    async def test_history_invalid_response_and_missing_serial(self):
+        session = Session(success({"records": [], "total": True}))
+        client = api.BololoClient(session, token="token")
+        with self.assertRaises(api.BololoError):
+            await client.async_get_water_history({"productKey": "x", "mac": "y"}, end_time=200)
+        self.assertFalse(session.calls)
+        with self.assertRaises(api.BololoError):
+            await client.async_get_water_history(DEVICE, end_time=200)
+
     async def test_login_observed_envelope_and_token_location(self):
         session = Session(success(login_data()))
         client = api.BololoClient(session, "phone", "password", "86")
