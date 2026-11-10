@@ -1,0 +1,62 @@
+[
+  {
+    "file": "rea-artifact.json",
+    "evidence_id": "ev_0377fec1a47399b053a0bd5d59773271eaaad74da6989e3a6314cf9a1b6fb02d",
+    "operation": "inspect_artifact",
+    "subject": {
+      "name": "D:\\own\\home-assistant\\bololo-smart-control\\com.gizwits.MainApplication.apk.1",
+      "digest": {
+        "sha256": "d163fc6436fb9ee6322c71fa97d5aef81026f43805101f4ac3dbfc2b5cb58172"
+      },
+      "format": "zip",
+      "architecture": null,
+      "local_path": "D:\\own\\home-assistant\\bololo-smart-control\\com.gizwits.MainApplication.apk.1"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact",
+    "statistics": null,
+    "graph_node_count": 0,
+    "graph_edge_count": 0,
+    "limitations": [
+      "Inspection derives bounded static hypotheses and next probes; it does not execute the artifact or claim format-specific semantics.",
+      "Logical archive names collide under English (en-US) Unicode case folding; a case-insensitive destination cannot store both spellings. This comparison is not a filesystem observation.",
+      "ZIP inventory lists central-directory entries only. Bytes after the central directory, including an APK Signing Block or a ZIP comment, are not occurrences."
+    ]
+  },
+  {
+    "file": "rea-focused-complete.json",
+    "evidence_id": "ev_60d6f99fa33b5ffc90d2000995a51586a757151f93c75ab29364dd04d8d4a123",
+    "operation": "analyze_javascript_application",
+    "subject": {
+      "name": "D:\\own\\home-assistant\\bololo-smart-control\\analysis\\focused",
+      "digest": {
+        "sha256": "4c0f8ecb008144af68dfeef2661ee0aa252e43b51ee98cfd34de4f4c1702b0f0"
+      },
+      "format": "directory",
+      "architecture": null,
+      "local_path": "D:\\own\\home-assistant\\bololo-smart-control\\analysis\\focused"
+    },
+    "confidence": "derived",
+    "authority": "shipped-artifact",
+    "statistics": {
+      "relevant_files": 9,
+      "nested_asar_containers": 0,
+      "text_bytes_read": 87627,
+      "invalid_utf8_files": 0,
+      "parsed_javascript_files": 9,
+      "visited_ast_nodes": 26035,
+      "findings": 0,
+      "modules": 0,
+      "parse_failures": 0
+    },
+    "graph_node_count": 19,
+    "graph_edge_count": 18,
+    "limitations": [
+      "CommonJS and ESM binding relationships were recovered from inert syntax and resolved only within the inventoried artifact container.",
+      "JavaScript and HTML were parsed as inert text; bundle bootstrap code was never executed.",
+      "Static imports, entrypoints, workers, endpoints, and storage relationships do not prove runtime execution.",
+      "Static paths and relationships may remain unresolved when expressions are dynamic or obfuscated.",
+      "Webpack/Rspack factories were recovered from AST literals; REA did not invoke push handlers or bundle bootstrap code."
+    ]
+  }
+]

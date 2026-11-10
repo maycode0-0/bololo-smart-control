@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+pytest-cache-files-*/
+tests/bololo-ha-test-*/
+tests/bololo-release-test-*/
+*.pyc
+*.apk
+*.apk.1
+analysis/assets/
+analysis/focused/
+analysis/tmp/
+analysis/rea-javascript.json
+analysis/rea-focused.json
+dist/
+.codegraph/
+# Preserve reports and small schema summaries; keep raw reverse-engineering
+# artifacts and third-party application code on this machine.
+analysis/*
+!analysis/*.md
+!analysis/rea-summary.json
+!analysis/product-summary.json
+!analysis/lan/
+analysis/lan/*
+!analysis/lan/NATIVE_PROTOCOL.md

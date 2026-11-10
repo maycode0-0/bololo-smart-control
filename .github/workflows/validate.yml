@@ -1,0 +1,51 @@
+name: BOLOLO Smart Control validation
+
+on:
+  push:
+    branches-ignore: [main]
+    tags-ignore: ['**']
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Tests and release package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -X utf8 -m pytest -q -p no:cacheprovider
+      - name: Lint and check formatting
+        run: |
+          ruff check custom_components tools tests
+          ruff format --check custom_components tools tests
+      - name: Build and verify release packages
+        run: python tools/build_release.py
+
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # No upstream BOLOLO brand or repository topics yet. Both checks
+          # concern catalog metadata; manifest and package checks remain enabled.
+          ignore: brands topics
+
+  hassfest:
+    name: Home Assistant hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master

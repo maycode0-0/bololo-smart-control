@@ -1,0 +1,58 @@
+{
+  "title": "BOLOLO",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect BOLOLO",
+        "description": "Enter your BOLOLO app account to retrieve bound devices on first setup. LAN is preferred by default, with cloud fallback when safe. Change the mode later in options.",
+        "data": {
+          "username": "Phone number or email",
+          "password": "Password",
+          "country_code": "Phone country code",
+          "connection_mode": "Connection mode"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the BOLOLO cloud. Try again later.",
+      "invalid_auth": "The account, password or country code was rejected."
+    },
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "reauth_successful": "Authentication was updated.",
+      "wrong_account": "Sign in to the same BOLOLO account as this integration."
+    }
+  },
+  "selector": {
+    "connection_mode": {
+      "options": {
+        "auto": "Automatic: LAN first, cloud fallback",
+        "cloud": "Cloud only",
+        "lan": "LAN only"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Connection settings",
+        "description": "Choose a connection mode. Optionally select a device to override its LAN address or passcode. LAN-only mode uses the cached inventory without refreshing cloud account bindings.",
+        "data": {
+          "connection_mode": "Connection mode",
+          "device": "Configure LAN device (optional)"
+        }
+      },
+      "device": {
+        "title": "{device}",
+        "description": "The integration discovers addresses and obtains local passcodes automatically. An IPv4 override assists discovery; allow UDP 12414, 2415 and TCP 12416. Passcodes normally do not need to be entered. Leave a field blank to clear its override.",
+        "data": {
+          "host": "IPv4 address (optional)",
+          "passcode": "Local passcode (optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_host": "Enter a valid IPv4 address."
+    }
+  }
+}

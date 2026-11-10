@@ -1,0 +1,58 @@
+{
+  "title": "BOLOLO 波咯咯",
+  "config": {
+    "step": {
+      "user": {
+        "title": "连接波咯咯",
+        "description": "填写波咯咯 App 的账号和密码，首次连接云端获取已绑定设备清单。默认优先使用局域网，失败时按需使用云端；以后可在选项中切换模式。",
+        "data": {
+          "username": "手机号或邮箱",
+          "password": "密码",
+          "country_code": "手机国家区号",
+          "connection_mode": "连接模式"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接波咯咯云服务，请稍后重试。",
+      "invalid_auth": "账号、密码或国家区号验证失败。"
+    },
+    "abort": {
+      "already_configured": "此账号已添加。",
+      "reauth_successful": "认证信息已更新。",
+      "wrong_account": "请使用此集成原来绑定的波咯咯账号登录。"
+    }
+  },
+  "selector": {
+    "connection_mode": {
+      "options": {
+        "auto": "自动：局域网优先，云端备用",
+        "cloud": "仅云端",
+        "lan": "仅局域网"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "连接设置",
+        "description": "选择连接模式。需要手动指定局域网地址或覆盖本地认证码时，可选择一台设备。仅局域网模式使用缓存清单，不刷新云端设备绑定关系。",
+        "data": {
+          "connection_mode": "连接模式",
+          "device": "配置局域网设备（可选）"
+        }
+      },
+      "device": {
+        "title": "{device}",
+        "description": "默认自动发现地址并从设备获取本地认证码。填写 IPv4 地址用于辅助发现；需要放行 UDP 12414、2415 和 TCP 12416。认证码通常无需填写。留空可清除已有覆盖值。",
+        "data": {
+          "host": "IPv4 地址（可选）",
+          "passcode": "本地认证码（可选）"
+        }
+      }
+    },
+    "error": {
+      "invalid_host": "请输入有效的 IPv4 地址。"
+    }
+  }
+}
