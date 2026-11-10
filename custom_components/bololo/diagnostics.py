@@ -7,7 +7,7 @@ from .schema import device_id
 async def async_get_config_entry_diagnostics(hass, entry):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     return {
-        "integration_version": "0.1.3",
+        "integration_version": "0.1.4",
         "connection_mode": getattr(coordinator.client, "mode", "cloud"),
         "last_update_success": coordinator.last_update_success,
         "inventory_refresh_error": (
