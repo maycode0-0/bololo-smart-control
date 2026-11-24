@@ -25,6 +25,11 @@ class BololoNumber(BololoEntity, NumberEntity):
             self._attr_native_unit_of_measurement = "mL"
         if product_key == Z60 and point.key in Z60_BOUNDS:
             self._attr_native_unit_of_measurement = "min"
+        if product_key == Z60:
+            if point.key in {"storage_time", "custom_storage_time"}:
+                self._attr_native_unit_of_measurement = "min"
+            elif point.key == "warm_storage_time":
+                self._attr_native_unit_of_measurement = "h"
 
     @property
     def native_value(self):

@@ -61,6 +61,7 @@ def test_delayed_volume_attaches_to_recent_dispense_once(products):
     journal = history.summary("p30", "water")
     assert journal["count"] == 1
     assert journal["records"][0]["volume_ml"] == 180
+    assert journal["total_volume_ml"] == 180
 
 
 def test_volume_report_when_short_operation_was_missed(products):
@@ -77,6 +78,84 @@ def test_cabinet_pause_resume_is_one_record_and_scene_is_not_disinfection(produc
     journal = history.summary("z60", "sterilize")
     assert journal["count"] == 1
     assert journal["records"][0]["mode"] == 1
+
+
+@pytest.mark.parametrize(
+    "reports",
+    [
+        ({"status": 2}, {"work_mode": 1}),
+        ({"work_mode": 1}, {"status": 2}),
+    ],
+)
+def test_cabinet_status_and_mode_can_arrive_in_separate_reports(products, reports):
+    history = OperationHistory()
+    history.observe("z60", products[Z60], {"status": 1, "work_mode": 0}, "lan")
+    for attrs in (*reports, {"status": 3}, {"status": 2}, {"work_mode": 0}, {"status": 1}):
+        history.observe("z60", products[Z60], attrs, "lan")
+    journal = history.summary("z60", "sterilize")
+    assert journal["count"] == 1
+    assert journal["records"][0]["mode"] == 1
+    assert journal["records"][0]["outcome"] == "ended"
+
+
+@pytest.mark.parametrize(
+    "switch, mode", [("auto_switch", 1), ("dry_switch", 2), ("disinfection_switch", 3)]
+)
+@pytest.mark.parametrize("switch_first", [False, True])
+def test_cabinet_can_identify_reported_mode_switch_when_work_mode_is_missing(
+    products, switch, mode, switch_first
+):
+    history = OperationHistory()
+    history.observe("z60", products[Z60], {"status": 1, switch: False}, "lan")
+    reports = [{"status": 2}, {switch: True}]
+    if switch_first:
+        reports.reverse()
+    for attrs in (*reports, {"status": 3}, {"status": 2}, {"status": 1, switch: False}):
+        history.observe("z60", products[Z60], attrs, "lan")
+    journal = history.summary("z60", "sterilize")
+    assert journal["count"] == 1
+    assert journal["records"][0]["mode"] == mode
+    assert journal["records"][0]["outcome"] == "ended"
+
+
+def test_cabinet_delayed_mode_keeps_observed_start_time(products):
+    history = OperationHistory()
+    now = datetime(2026, 11, 10, tzinfo=UTC)
+    for offset, attrs in (
+        (0, {"status": 1, "work_mode": 0}),
+        (30, {"status": 2}),
+        (60, {"work_mode": 1}),
+        (90, {"status": 1}),
+    ):
+        history.observe("z60", products[Z60], attrs, "lan", now + timedelta(seconds=offset))
+    record = history.summary("z60", "sterilize")["records"][0]
+    assert record["started_at"] == (now + timedelta(seconds=30)).isoformat()
+
+
+def test_cabinet_initial_running_state_and_transport_switch_do_not_invent_start(products):
+    history = OperationHistory()
+    for attrs, source in (
+        ({"status": 2, "work_mode": 0}, "lan"),
+        ({"work_mode": 1}, "lan"),
+        ({"status": 1, "work_mode": 0}, "lan"),
+        ({"status": 2}, "lan"),
+        ({"status": 2, "work_mode": 0}, "cloud"),
+        ({"work_mode": 1}, "cloud"),
+    ):
+        history.observe("z60", products[Z60], attrs, source)
+    assert history.summary("z60", "sterilize")["count"] == 0
+
+
+@pytest.mark.parametrize("mode", [4, 5, 255])
+def test_cabinet_scene_does_not_reuse_stale_mode_switch(products, mode):
+    history = OperationHistory()
+    for attrs in (
+        {"status": 1, "work_mode": 0, "auto_switch": False},
+        {"status": 2, "work_mode": mode, "auto_switch": True},
+        {"status": 1},
+    ):
+        history.observe("z60", products[Z60], attrs, "lan")
+    assert history.summary("z60", "sterilize")["count"] == 0
 
 
 def test_dual_cabinet_chambers_have_separate_records(products):
@@ -133,6 +212,65 @@ def test_history_is_bounded_but_count_survives_restart(products):
     assert restored.summary("p30", "water") == journal
 
 
+def test_water_total_accumulates_confirmed_dispenses_once(products):
+    history = OperationHistory()
+    for attrs in (
+        {"detect_status": False, "record": 0},
+        {"detect_status": True},
+        {"record": 60},
+        {"record": 120},
+        {"detect_status": False, "record": 120},
+        {"detect_status": False, "record": 120},
+        {"record": 180},
+        {"record": 180},
+        {"record": 0},
+    ):
+        history.observe("p30", products[P30], attrs, "lan")
+    journal = history.summary("p30", "water")
+    assert journal["count"] == 2
+    assert journal["total_volume_ml"] == 300
+    assert history.summary("other", "water")["total_volume_ml"] == 0
+
+
+def test_water_total_survives_trimming_restart_and_observation_gaps(products):
+    history = OperationHistory()
+    volumes = range(2000, 2000 + HISTORY_LIMIT + 12)
+    history.observe("p30", products[P30], {"record": 0}, "lan")
+    for volume in volumes:
+        history.observe("p30", products[P30], {"record": volume}, "lan")
+    journal = history.summary("p30", "water")
+    assert len(journal["records"]) == HISTORY_LIMIT
+    assert journal["total_volume_ml"] == sum(volumes) > 99999
+
+    restored = OperationHistory(history.data)
+    restored.observe("p30", products[P30], {"record": 3000}, "lan")
+    restored.observation_gap("p30")
+    restored.observe("p30", products[P30], {"record": 4000}, "lan")
+    restored.observe("p30", products[P30], {"record": 100}, "cloud")
+    assert restored.summary("p30", "water")["total_volume_ml"] == sum(volumes)
+    restored.observe("p30", products[P30], {"record": 120}, "cloud")
+    assert restored.summary("p30", "water")["total_volume_ml"] == sum(volumes) + 120
+
+
+@pytest.mark.parametrize("total", [None, -1, True, "invalid", float("nan"), float("inf")])
+def test_legacy_water_total_uses_only_retained_valid_volumes(total):
+    history = OperationHistory(
+        {
+            "p30": {
+                "water": {
+                    "count": 100,
+                    "records": [
+                        {"volume_ml": volume}
+                        for volume in (120, 180, None, -1, True, float("nan"), float("inf"))
+                    ],
+                    "total_volume_ml": total,
+                }
+            }
+        }
+    )
+    assert history.summary("p30", "water")["total_volume_ml"] == 300
+
+
 def test_missing_invalid_reports_and_old_pending_volume(products):
     history = OperationHistory()
     now = datetime(2026, 11, 10, tzinfo=UTC)
@@ -142,3 +280,4 @@ def test_missing_invalid_reports_and_old_pending_volume(products):
         history.observe("p30", products[P30], {"record": value}, "lan", now)
     history.observe("p30", products[P30], {"record": 180}, "lan", now + timedelta(minutes=5))
     assert history.summary("p30", "water")["count"] == 2
+    assert history.summary("p30", "water")["total_volume_ml"] == 180

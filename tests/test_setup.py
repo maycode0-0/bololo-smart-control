@@ -63,15 +63,27 @@ class FullSetupTests(unittest.IsolatedAsyncioTestCase):
                 "mac": "AA:BB:CC:DD:EE:FF",
                 "name": "Kitchen warmer",
             }
+            cabinet = {
+                "productKey": "k1mvpUrX2eb000000000000000000000",
+                "mac": "11:22:33:44:55:66",
+                "name": "Kitchen cabinet",
+            }
             client = SimpleNamespace(
                 uid="account-1",
                 async_login=AsyncMock(),
-                async_get_devices=AsyncMock(return_value=[device]),
+                async_get_devices=AsyncMock(return_value=[device, cabinet]),
                 async_get_status=AsyncMock(
                     return_value={
                         "switch": True,
                         "temp_set": 40,
                         "temp_current": 39,
+                        "fault": 0.0,
+                        "error": 0.0,
+                        "status": 1,
+                        "work_mode": 0,
+                        "auto_switch": False,
+                        "storage_time": 4320,
+                        "warm_storage_time": 5,
                         "pattern": "tap_water",
                         "status_time": "2026-11-10 12:00:00",
                     }
@@ -98,7 +110,18 @@ class FullSetupTests(unittest.IsolatedAsyncioTestCase):
                 power = next(item for item in entries if item.unique_id.endswith("_switch"))
                 self.assertEqual(hass.states.get(power.entity_id).state, "on")
                 target = next(item for item in entries if item.unique_id.endswith("_temp_set"))
-                self.assertEqual(hass.states.get(target.entity_id).state, "40.0")
+                self.assertEqual(hass.states.get(target.entity_id).state, "40")
+                fault = next(item for item in entries if item.unique_id.endswith("_fault"))
+                self.assertEqual(hass.states.get(fault.entity_id).state, "0")
+                error = next(item for item in entries if item.unique_id.endswith("_error"))
+                self.assertEqual(hass.states.get(error.entity_id).state, "0")
+                storage = next(
+                    item for item in entries if item.unique_id.endswith("112233445566_storage_time")
+                )
+                self.assertEqual(hass.states.get(storage.entity_id).state, "4320")
+                self.assertEqual(
+                    hass.states.get(storage.entity_id).attributes["unit_of_measurement"], "min"
+                )
                 source_select = next(
                     item for item in entries if item.unique_id.endswith("_pattern")
                 )
@@ -120,6 +143,22 @@ class FullSetupTests(unittest.IsolatedAsyncioTestCase):
                     blocking=True,
                 )
                 client.async_control.assert_awaited_with(device, {"pattern": "pure_water"})
+                cabinet_history = next(
+                    item for item in entries if item.unique_id.endswith("_sterilize_history")
+                )
+                self.assertEqual(hass.states.get(cabinet_history.entity_id).state, "0")
+                client.async_get_status.return_value["status"] = 2
+                await coordinator.async_refresh()
+                self.assertEqual(hass.states.get(cabinet_history.entity_id).state, "0")
+                client.async_get_status.return_value["auto_switch"] = True
+                await coordinator.async_refresh()
+                self.assertEqual(hass.states.get(cabinet_history.entity_id).state, "1")
+                client.async_get_status.return_value.update(status=1, auto_switch=False)
+                await coordinator.async_refresh()
+                state = hass.states.get(cabinet_history.entity_id)
+                self.assertEqual(state.state, "1")
+                self.assertEqual(state.attributes["records"][0]["outcome"], "ended")
+                self.assertFalse(state.attributes["cloud_sync_supported"])
                 self.assertTrue(coordinator._listeners)
                 self.assertTrue(await hass.config_entries.async_unload(entry.entry_id))
                 await hass.async_block_till_done()

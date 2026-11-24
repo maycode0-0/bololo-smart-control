@@ -1,11 +1,21 @@
 """Read-only numeric and enumerated device datapoints."""
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.const import UnitOfVolume
 
 from .const import DOMAIN
 from .entity import BololoEntity, async_setup_datapoints
 from .history import history_kinds, history_name
 from .schema import Datapoint
+
+
+def _complete_water_history(coordinator, identifier):
+    manager = coordinator.cloud_history
+    if manager is not None:
+        summary = manager.summary(identifier)
+        if summary.get("complete"):
+            return summary
+    return None
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -34,6 +44,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class BololoSensor(BololoEntity, SensorEntity):
     def __init__(self, coordinator, identifier, point):
         super().__init__(coordinator, identifier, point)
+        self._water_total = point.key == "record" and "water" in history_kinds(
+            coordinator.data[identifier].product
+        )
         if point.kind == "enum":
             self._attr_device_class = SensorDeviceClass.ENUM
             self._attr_options = list(point.labels or point.options)
@@ -41,6 +54,32 @@ class BololoSensor(BololoEntity, SensorEntity):
             self._attr_device_class = SensorDeviceClass.TEMPERATURE
             self._attr_native_unit_of_measurement = "°C"
             self._attr_state_class = SensorStateClass.MEASUREMENT
+        elif self._water_total:
+            self._attr_device_class = SensorDeviceClass.VOLUME
+            self._attr_native_unit_of_measurement = UnitOfVolume.MILLILITERS
+            # Official history allows edits/deletions, which can correct the total.
+            self._attr_state_class = SensorStateClass.TOTAL
+
+    @property
+    def value(self):
+        if self._water_total:
+            cloud = _complete_water_history(self.coordinator, self.identifier)
+            if cloud is not None:
+                return cloud["total_volume_ml"]
+            return self.coordinator.history.summary(self.identifier, "water")["total_volume_ml"]
+        return super().value
+
+    @property
+    def extra_state_attributes(self):
+        attributes = super().extra_state_attributes
+        if self._water_total and attributes is not None:
+            cloud = _complete_water_history(self.coordinator, self.identifier)
+            attributes.update(
+                record_source="cloud" if cloud is not None else "home_assistant",
+                cloud_history_complete=cloud is not None,
+                last_synced=cloud.get("last_synced") if cloud is not None else None,
+            )
+        return attributes
 
     @property
     def native_value(self):
@@ -65,6 +104,10 @@ class BololoHistorySensor(BololoEntity, SensorEntity):
         if self.kind == "cloud_water":
             manager = self.coordinator.cloud_history
             return manager.summary(self.identifier) if manager else {}
+        if self.kind == "water":
+            cloud = _complete_water_history(self.coordinator, self.identifier)
+            if cloud is not None:
+                return {**cloud, "count": cloud["synced_count"], "record_source": "cloud"}
         return self.coordinator.history.summary(self.identifier, self.kind)
 
     @property
@@ -86,5 +129,6 @@ class BololoHistorySensor(BololoEntity, SensorEntity):
         journal = self.journal
         return {
             "record_source": "cloud" if self.kind == "cloud_water" else "home_assistant",
+            "cloud_sync_supported": self.kind in {"water", "cloud_water"},
             **journal,
         }

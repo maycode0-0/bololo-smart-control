@@ -194,6 +194,21 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(add.call_count, 2)
         self.assertEqual(len(add.call_args.args[0]), 1)
 
+    async def test_z60_storage_duration_has_documented_units(self):
+        product = (await self.hass.async_add_executor_job(load_products))[Z60]
+        device = {"productKey": Z60, "mac": "AA:BB"}
+        identifier = device_id(device)
+        self.coordinator.data = {identifier: DeviceState(device, product, {}, True)}
+        points = {point.key: point for point in product.datapoints}
+        for key, unit in (
+            ("storage_time", "min"),
+            ("custom_storage_time", "min"),
+            ("warm_storage_time", "h"),
+        ):
+            with self.subTest(key=key):
+                sensor = BololoNumber(self.coordinator, identifier, points[key])
+                self.assertEqual(sensor.native_unit_of_measurement, unit)
+
 
 class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
     def make_flow(self, source="user", entry=None):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from datetime import datetime
 
@@ -36,14 +37,26 @@ def history_name(kind):
     return prefix + NAMES[kind.removeprefix("cabin1_").removeprefix("cabin2_")]
 
 
-def _number(value):
+def _number(value, maximum=99999):
     if isinstance(value, bool):
         return None
     try:
         value = float(value)
-        return value if 0 <= value <= 99999 else None
+        return value if math.isfinite(value) and 0 <= value <= maximum else None
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _cabinet_mode(attrs, prefix):
+    mode = _number(attrs.get(prefix + "work_mode"))
+    if mode not in (None, 0):
+        return mode
+    switches = [
+        index
+        for index, key in enumerate(("auto_switch", "dry_switch", "disinfection_switch"), 1)
+        if _BOOL.decode(attrs.get(prefix + key)) is True
+    ]
+    return switches[0] if len(switches) == 1 else mode
 
 
 class OperationHistory:
@@ -65,10 +78,21 @@ class OperationHistory:
                             [item for item in records if isinstance(item, dict)][:HISTORY_LIMIT]
                         ),
                     }
+                    if kind == "water":
+                        total = _number(journal.get("total_volume_ml"), maximum=math.inf)
+                        self.data[identifier][kind]["total_volume_ml"] = (
+                            total
+                            if total is not None
+                            else sum(
+                                _number(record.get("volume_ml")) or 0
+                                for record in self.data[identifier][kind]["records"]
+                            )
+                        )
         self._previous = {}
         self._sources = {}
         self._active = {}
         self._pending_water = {}
+        self._pending_cabinet = {}
         # A restart loses continuous observation; never call it a completed cycle.
         for kinds in self.data.values():
             for journal in kinds.values():
@@ -77,11 +101,18 @@ class OperationHistory:
                         record["outcome"] = "observation_gap"
 
     def summary(self, identifier, kind):
-        return deepcopy(self.data.get(identifier, {}).get(kind, {"count": 0, "records": []}))
+        empty = {"count": 0, "records": []}
+        if kind == "water":
+            empty["total_volume_ml"] = 0
+        return deepcopy(self.data.get(identifier, {}).get(kind, empty))
 
     def _append(self, identifier, kind, record):
         journal = self.data.setdefault(identifier, {}).setdefault(kind, {"count": 0, "records": []})
         journal["count"] += 1
+        if kind == "water":
+            journal["total_volume_ml"] = journal.get("total_volume_ml", 0) + (
+                _number(record.get("volume_ml")) or 0
+            )
         journal["records"].insert(0, record)
         del journal["records"][HISTORY_LIMIT:]
         return record
@@ -100,6 +131,8 @@ class OperationHistory:
             return
         for kind, prefix in history_kinds(product).items():
             key = (identifier, kind)
+            started_at = stamp
+            start_observed = False
             if kind == "water":
                 self._water(identifier, attrs, previous, merged, source, now)
                 continue
@@ -113,25 +146,40 @@ class OperationHistory:
                 mode = "boiling"
                 paused = False
             else:
-                if prefix + "status" not in attrs or prefix + "work_mode" not in merged:
+                if not any(
+                    prefix + field in attrs
+                    for field in (
+                        "status",
+                        "work_mode",
+                        "auto_switch",
+                        "dry_switch",
+                        "disinfection_switch",
+                    )
+                ):
                     continue
                 old_status = _number(previous.get(prefix + "status"))
-                status = _number(attrs[prefix + "status"])
+                status = _number(merged.get(prefix + "status"))
                 before = old_status in (2, 3) if old_status in (0, 1, 2, 3) else None
                 after = status in (2, 3) if status in (0, 1, 2, 3) else None
-                mode = _number(merged.get(prefix + "work_mode"))
+                mode = _cabinet_mode(merged, prefix)
+                if before is False and status == 2:
+                    self._pending_cabinet[key] = stamp
+                elif after is False:
+                    self._pending_cabinet.pop(key, None)
+                start_observed = key in self._pending_cabinet
+                started_at = self._pending_cabinet.get(key, stamp)
                 paused = status == 3
                 # Only actual disinfect/dry programs; exclude yogurt/fruit scenes.
                 if mode not in (1, 2, 3) and key not in self._active:
                     continue
                 if paused and key not in self._active:
                     continue
-            if before is False and after is True:
+            if after is True and (before is False or start_observed) and key not in self._active:
                 record = self._append(
                     identifier,
                     kind,
                     {
-                        "started_at": stamp,
+                        "started_at": started_at,
                         "ended_at": None,
                         "mode": mode,
                         "outcome": "running",
@@ -139,6 +187,7 @@ class OperationHistory:
                     },
                 )
                 self._active[key] = record
+                self._pending_cabinet.pop(key, None)
             record = self._active.get(key)
             if record is None:
                 continue
@@ -183,6 +232,7 @@ class OperationHistory:
             if pending and (now - pending[0]).total_seconds() <= 120:
                 pending[1]["volume_ml"] = volume
                 pending[1]["bottle_number"] = _number(merged.get("bottle_record"))
+                self.data[identifier]["water"]["total_volume_ml"] += volume
             else:
                 self._append(
                     identifier,
@@ -202,6 +252,9 @@ class OperationHistory:
         self._previous.pop(identifier, None)
         self._sources.pop(identifier, None)
         self._pending_water.pop(identifier, None)
+        for key in list(self._pending_cabinet):
+            if key[0] == identifier:
+                self._pending_cabinet.pop(key)
         for key in list(self._active):
             if key[0] == identifier:
                 record = self._active.pop(key)

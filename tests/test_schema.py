@@ -112,6 +112,18 @@ def test_nonfinite_reports_and_readonly_writes():
         point.encode(40)
 
 
+@pytest.mark.parametrize("key", ["error", "fault", "status", "cabin1_error", "cabin2_error"])
+@pytest.mark.parametrize("value", [0, 0.0, "0", "0.0", 3, "3"])
+def test_integer_codes_do_not_decode_as_decimal_numbers(key, value):
+    decoded = Datapoint(key, key, "uint8", False).decode(value)
+    assert type(decoded) is int
+    assert str(decoded) == str(int(float(value)))
+
+
+def test_fractional_engineering_value_is_preserved():
+    assert Datapoint("temp_current", "Temperature", "uint16", False).decode("37.5") == 37.5
+
+
 def test_device_identity_ignores_renames_and_mac_punctuation():
     assert device_id({"productKey": P30, "mac": "AA:BB:CC", "name": "old"}) == device_id(
         {"productKey": P30, "mac": "aabbcc", "name": "new"}

@@ -149,6 +149,7 @@ class CloudHistoryTests(unittest.IsolatedAsyncioTestCase):
         summary = await self.sync([record(index, date=NOW - index) for index in range(80)])
         self.assertEqual(summary["synced_count"], 80)
         self.assertEqual(len(summary["records"]), 50)
+        self.assertEqual(summary["total_volume_ml"], 80 * 120)
         self.assertEqual(len(self.store.data["devices"][IDENTIFIER]["records"]), 80)
         self.assertEqual(summary["records"][0]["id"], 0)
         encoded = json.dumps(self.store.data)
@@ -210,6 +211,7 @@ class CloudHistoryTests(unittest.IsolatedAsyncioTestCase):
         summary = self.manager.summary(IDENTIFIER)
         self.assertTrue(summary["complete"])
         self.assertEqual(summary["synced_count"], 1)
+        self.assertEqual(summary["total_volume_ml"], 120)
 
     def test_naive_cloud_date_uses_home_assistant_timezone(self):
         with patch("homeassistant.util.dt.DEFAULT_TIME_ZONE", ZoneInfo("Asia/Shanghai")):

@@ -78,7 +78,9 @@ class Datapoint:
             return None
         try:
             number = float(value)
-            return number if math.isfinite(number) else None
+            if not math.isfinite(number):
+                return None
+            return int(number) if number.is_integer() else number
         except (TypeError, ValueError, OverflowError):
             return None
 

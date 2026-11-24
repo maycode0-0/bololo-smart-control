@@ -288,6 +288,7 @@ class CloudHistoryManager:
         return {
             "records": deepcopy(records[:50]),
             "synced_count": len(records),
+            "total_volume_ml": sum(item.get("waterOutput", 0) for item in records),
             "server_total": value["server_total"],
             "server_total_scope": "sync_window",
             "complete": value["complete"],

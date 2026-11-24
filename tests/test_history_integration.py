@@ -6,13 +6,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.bololo.coordinator import BololoCoordinator
+from custom_components.bololo.history import OperationHistory
 from custom_components.bololo.model_overrides import P30
 from custom_components.bololo.schema import device_id, load_products
-from custom_components.bololo.sensor import BololoHistorySensor
+from custom_components.bololo.sensor import BololoHistorySensor, BololoSensor
 
 
 class HistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -94,6 +97,69 @@ class HistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sensor.native_value, 0)
         self.assertEqual(cloud.native_value, 4)
         self.assertEqual(sensor.extra_state_attributes["record_source"], "home_assistant")
+
+    async def test_water_total_sensor_uses_persisted_sum_instead_of_latest_report(self):
+        self.client.mode = "lan"
+        self.manager.summary.return_value = {"complete": False, "synced_count": 0, "records": []}
+        store = SimpleNamespace(async_delay_save=Mock(), async_save=AsyncMock())
+        self.coordinator._history_store = store
+        for volume in (0, 120, 120, 180, 180):
+            self.client.async_get_status.return_value = {"record": volume}
+            await self.poll()
+        point = next(
+            p
+            for p in self.coordinator.data[self.identifier].product.datapoints
+            if p.key == "record"
+        )
+        sensor = BololoSensor(self.coordinator, self.identifier, point)
+        self.assertEqual(sensor.native_value, 300)
+        self.assertEqual(sensor.device_class, SensorDeviceClass.VOLUME)
+        self.assertEqual(sensor.native_unit_of_measurement, UnitOfVolume.MILLILITERS)
+        self.assertEqual(sensor.state_class, SensorStateClass.TOTAL)
+        self.assertEqual(sensor.unique_id, self.identifier + "_record")
+        self.assertTrue(sensor.available)
+        await self.coordinator.async_shutdown()
+        saved = store.async_save.call_args.args[0]["devices"]
+        self.coordinator.history = OperationHistory(saved)
+        await self.poll()
+        self.assertEqual(sensor.native_value, 300)
+        self.client.async_get_status.return_value = {"record": 60}
+        await self.poll()
+        self.assertEqual(sensor.native_value, 360)
+
+    async def test_complete_cloud_water_history_is_authoritative_without_double_counting(self):
+        self.client.mode = "lan"
+        self.manager.summary.return_value = {"complete": False, "synced_count": 0, "records": []}
+        for volume in (0, 120, 180):
+            self.client.async_get_status.return_value = {"record": volume}
+            await self.poll()
+        point = next(
+            p
+            for p in self.coordinator.data[self.identifier].product.datapoints
+            if p.key == "record"
+        )
+        total = BololoSensor(self.coordinator, self.identifier, point)
+        history = BololoHistorySensor(self.coordinator, self.identifier, "water")
+        self.assertEqual(total.native_value, 300)
+        self.assertEqual(history.native_value, 2)
+        self.manager.summary.return_value = {
+            "complete": True,
+            "synced_count": 20,
+            "total_volume_ml": 3200,
+            "records": [{"id": 1, "date": 123, "waterOutput": 120}],
+            "last_synced": "2026-11-24T00:00:00+00:00",
+        }
+        for _ in range(3):
+            await self.poll()
+            self.assertEqual(total.native_value, 3200)
+            self.assertEqual(history.native_value, 20)
+        self.assertEqual(total.extra_state_attributes["record_source"], "cloud")
+        self.assertEqual(history.extra_state_attributes["record_source"], "cloud")
+        self.assertEqual(history.extra_state_attributes["records"][0]["waterOutput"], 120)
+        self.assertEqual(total.state_class, SensorStateClass.TOTAL)
+        # Cloud corrections replace the saved result, rather than being added again.
+        self.manager.summary.return_value["total_volume_ml"] = 3000
+        self.assertEqual(total.native_value, 3000)
 
     async def test_bottle_commands_are_whitelisted_and_do_not_fake_device_state(self):
         self.client.mode = "lan"
