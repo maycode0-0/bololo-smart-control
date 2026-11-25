@@ -201,17 +201,21 @@ class CloudHistoryManager:
         identifier = device_id(device)
         async with self._lock:
             work = deepcopy(self._devices.get(identifier, _empty()))
+            now = int(time.time() * 1000)
             if work["pending"] is None:
                 start = max(0, work["watermark"] - _DAY_MS) if work["complete"] else 0
                 work["pending"] = {
                     "start": start,
-                    "end": max(start, int(time.time() * 1000)),
+                    "end": max(start, now),
                     "current": 1,
                     "seen": 0,
                     "size": self.page_size,
                     "total": None,
                     "records": {},
                 }
+            elif work["sync_error"] and work["pending"]["current"] == 1:
+                # No accepted pages to preserve, so retry against the latest history.
+                work["pending"]["end"] = max(work["pending"]["end"], now)
             try:
                 for _ in range(self.max_pages):
                     pending = work["pending"]

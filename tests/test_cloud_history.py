@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
-from custom_components.bololo.api import BololoAuthError, BololoConnectionError
+from custom_components.bololo.api import BololoAuthError, BololoConnectionError, BololoError
 from custom_components.bololo.cloud_history import CloudHistoryManager, _date_ms
 from custom_components.bololo.schema import device_id
 
@@ -80,6 +80,27 @@ class CloudHistoryTests(unittest.IsolatedAsyncioTestCase):
             DEVICE, current=2, size=2, start_time=0, end_time=NOW
         )
         self.assertIsNotNone(final["last_synced"])
+
+    async def test_retry_after_first_page_failure_includes_new_records(self):
+        self.cloud.async_get_water_history.side_effect = BololoError("Rejected history request")
+        await self.manager.async_sync(DEVICE, self.cloud)
+        first = self.manager.summary(IDENTIFIER)
+        self.assertEqual(first["staged_count"], 0)
+        self.assertEqual(first["window_end"], NOW)
+
+        self.manager = CloudHistoryManager(None, self.store)
+        await self.manager.async_load()
+        self.cloud.async_get_water_history.side_effect = None
+        later = NOW + 5000
+        with patch("custom_components.bololo.cloud_history.time.time", return_value=later / 1000):
+            final = await self.sync([record(1, date=later - 100)])
+
+        self.assertTrue(final["complete"])
+        self.assertEqual(final["synced_count"], 1)
+        self.assertIsNone(final["sync_error"])
+        self.cloud.async_get_water_history.assert_awaited_with(
+            DEVICE, current=1, size=2, start_time=0, end_time=later
+        )
 
     async def test_complete_cache_survives_partial_incremental_failure(self):
         first = await self.sync([record(1), record(2)])

@@ -6,26 +6,24 @@
 
 ## 官方出水历史
 
-- `analysis/assets/js-modules/3754.js` 的 `getFoamDetailAPI`（字符偏移约 2122）
-  使用正常 AEP 封装：POST `bololo/appdataSata/foam/detail/{sno}/{type}`，
-  body 对象为 `{current,size,query:{startTime,endTime}}`。
 - 官方 P30 `analysis/templates/p30/com.bololo.rn.paonaiji.1270.1/index.js`
-  的 `HistoryScreenNew` 查询（约 206619）传 `type:3`，未加宝宝筛选，是全部出水历史。
-  约 59673 的解析读取 `data.records`、`data.total`，记录 `date` 和 JSON 字符串
-  `data`，其中 `waterOutput` 为出水量。约 166193 的 `type:2` 另有宝宝筛选，
-  不作为设备全部出水历史。
-- 旧模块 1271 同名历史请求使用 `disabledWapper:true`。实现依据新版 3754 的
-  对象封装，不能将新旧请求封装混为一谈；真实服务兼容性仍待验证。
+  的 `HistoryScreenNew` 查询（约 206619）传 `type:3`，读取所选日期的全部出水历史。
+  约 59673 通过 `queryMilkBrewingMachineDetail` 读取 `data.records`、`data.total`，记录里的
+  `data` JSON 字符串包含 `waterOutput`。约 166193 的 `type:2` 按宝宝筛选。
+- 模块 3746 将 `queryMilkBrewingMachineDetail` 委托给 1271。后者向
+  `bololo/appdataSata/foam/detail/{sno}/{type}` POST JSON `{current,size,query:{startTime,endTime}}`，
+  设置 `disabledWapper:true`。模块 1161 据此直接发送 JSON，仍从响应读取 `code`、`data`。
+- 模块 3754 的 `getFoamDetailAPI` 对同一路径使用 AEP 封装。P30 模板约 79974 另有该服务的
+  调用。「所有记录」走的是上述 1271 调用链，v0.1.6 在集成里采用了 3754 的封装方式。
 
 完整分页回填、最近一天增量核对、私有 Store、显示最近 50 条均是本集成的设计，
 不声称官方 App 采用同样的缓存策略。首次历史窗口从时间戳 0 开始；服务器的保留期及
 当前账号可查询的记录范围未知。更早历史的编辑和删除不在增量核对窗口内。
 
-2026-11-25 根据“泡奶周报 → 所有记录”入口重新核对相同 P30 模板：字符偏移约 190253
-的周报入口跳转至 `HistoryScreenNew`；约 206619 的查询以所选日期的起止时间调用
-`queryDetail({startTime,endTime,type:3,current:1,size:999})`，没有宝宝或奶瓶筛选。
-约 206354 的当日总量对各条 `JSON.parse(data).waterOutput` 求和。
-这与本集成现用的接口和水量字段一致，不能据此断言另一份接口可以补齐更多数据。
+「泡奶周报 → 所有记录」的周报入口约 190253。所选日期查询使用
+`queryDetail({startTime,endTime,type:3,current:1,size:999})`，没有宝宝或奶瓶筛选，
+约 206354 的当日总量对各条 `JSON.parse(data).waterOutput` 求和。集成继续从时间戳 0
+分页回填。第一页失败后允许重试推进截止时间，已保存分页进度时继续使用固定窗口。
 
 本集成此前在官方回填未完成时回退显示本地累计，这个数不包含接入前及漏读的出水。
 现改为官方记录和水量完整前显示未知，本地累计单独列入属性；缺失水量也不作为确认的 0。

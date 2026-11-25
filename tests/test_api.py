@@ -66,7 +66,7 @@ DEVICE = {"mac": "AA:BB", "productKey": "product-1", "sno": "serial-1"}
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
-    async def test_water_history_uses_current_wrapped_api_type_and_pagination(self):
+    async def test_water_history_uses_the_all_records_screen_request(self):
         data = {"records": [{"id": 1, "date": 123, "data": '{"waterOutput":120}'}], "total": 1}
         session = Session(success(data))
         client = api.BololoClient(session, token="token")
@@ -80,9 +80,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(method, "POST")
         self.assertTrue(url.endswith("bololo/appdataSata/foam/detail/serial-1/3"))
         self.assertEqual(
-            kwargs["json"]["data"],
+            kwargs["json"],
             {"current": 2, "size": 50, "query": {"startTime": 100, "endTime": 200}},
         )
+        self.assertEqual(kwargs["headers"]["Authorization"], "token")
 
     async def test_bottle_cloud_contract_is_an_object_and_never_replays_post(self):
         payload = {"name": "奶瓶1", "icon": "", "babyId": 1, "num": 2, "bottleWeight": 1200}
@@ -203,6 +204,18 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await client.async_get_devices(), [DEVICE])
         self.assertEqual(len(session.calls), 3)
         self.assertEqual(session.calls[2][2]["headers"]["Authorization"], "new-token")
+
+    async def test_history_auth_retry_preserves_unwrapped_query(self):
+        data = {"records": [], "total": 0}
+        session = Session(Response({"code": 505}), success(login_data()), success(data))
+        client = api.BololoClient(session, "phone", "password", token="expired")
+        self.assertEqual(await client.async_get_water_history(DEVICE, end_time=200), data)
+        query = {"current": 1, "size": 100, "query": {"startTime": 0, "endTime": 200}}
+        self.assertEqual(len(session.calls), 3)
+        self.assertEqual(session.calls[0][2]["json"], query)
+        self.assertEqual(session.calls[2][2]["json"], query)
+        self.assertEqual(session.calls[2][2]["headers"]["Authorization"], "new-token")
+        self.assertEqual(session.calls[1][2]["json"]["appKey"], api.APP_ID)
 
     async def test_token_only_auth_failure_is_not_silently_empty_devices(self):
         session = Session(Response({"code": 526}))

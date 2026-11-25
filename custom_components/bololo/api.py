@@ -283,17 +283,19 @@ class BololoClient:
                     raise
         await self._login_locked()
 
-    async def _read(self, method: str, path: str, body: Any = _MISSING) -> Any:
+    async def _read(
+        self, method: str, path: str, body: Any = _MISSING, *, wrap_body: bool = True
+    ) -> Any:
         await self.async_ensure_authenticated()
         failed_token = self._token
         try:
-            return await self._raw_request(method, path, body)
+            return await self._raw_request(method, path, body, wrap_body=wrap_body)
         except BololoAuthError:
             async with self._auth_lock:
                 # Another in-flight poll may already have refreshed this session.
                 if self._token == failed_token:
                     await self._refresh_or_login_locked()
-            return await self._raw_request(method, path, body)
+            return await self._raw_request(method, path, body, wrap_body=wrap_body)
 
     async def async_get_devices(self) -> list[dict[str, Any]]:
         """Return the AEP's flat array of devices bound to this account."""
@@ -348,7 +350,7 @@ class BololoClient:
         start_time: int = 0,
         end_time: int,
     ) -> dict[str, Any]:
-        """Query all dispensing records, type 3 in the official P30 history screen."""
+        """Use the unwrapped query from the official P30 All Records screen."""
         serial = device.get("sno")
         if isinstance(serial, bool) or not isinstance(serial, (str, int)) or str(serial) == "":
             raise BololoError("Device is missing sno for cloud history")
@@ -360,6 +362,7 @@ class BololoClient:
                 "size": size,
                 "query": {"startTime": start_time, "endTime": end_time},
             },
+            wrap_body=False,
         )
         if not isinstance(data, dict):
             raise BololoError("Invalid history response")
@@ -387,6 +390,7 @@ class BololoClient:
         *,
         authenticated: bool = True,
         login: bool = False,
+        wrap_body: bool = True,
         extra_headers: dict[str, str] | None = None,
     ) -> Any:
         headers = {
@@ -406,7 +410,9 @@ class BololoClient:
             "allow_redirects": False,
         }
         if body is not _MISSING:
-            kwargs["json"] = {"appKey": APP_ID, "data": body, "version": "1.0"}
+            kwargs["json"] = (
+                {"appKey": APP_ID, "data": body, "version": "1.0"} if wrap_body else body
+            )
         try:
             async with self._session.request(method, BASE_URL + path, **kwargs) as response:
                 if response.status in (401, 403):
