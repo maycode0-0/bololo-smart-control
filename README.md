@@ -1,16 +1,17 @@
 # BOLOLO Smart Control
 
-[![Version](https://img.shields.io/badge/version-0.1.5-2f6f4e.svg)](custom_components/bololo/manifest.json)
+[![Version](https://img.shields.io/badge/version-0.1.6-2f6f4e.svg)](custom_components/bololo/manifest.json)
 [![Release workflow](https://github.com/maycode0-0/bololo-smart-control/actions/workflows/hacs-release.yml/badge.svg)](https://github.com/maycode0-0/bololo-smart-control/actions/workflows/hacs-release.yml)
 
 BOLOLO Smart Control 是面向 Home Assistant 的波咯咯自定义集成。它将云端账号、
 设备清单和局域网通信放在同一条设备、状态与控制链路中，默认优先使用 LAN，
 无法通过本地通道处理的请求按回退规则交给云端。
 
-## v0.1.5
+## v0.1.6
 
-本版修复 **用水总量累计**和**消烘记录漏记**。官方出水历史完整回填后，出水记录与用水总量
-统一使用全部官方缓存，重复同步不重复计入；整数状态、故障值显示为整数，并补充 Z60 保管参数的时间单位。
+本版修复 **将本地部分累计误显示为用水总量**的问题。官方历史回填完成且每条记录的水量均可确认前，
+用水总量显示“未知”，本地观察累计单独保存在属性中，并提供同步进度、缺失水量条数及缓存日期范围。
+已重新核对 App“泡奶周报 → 所有记录”入口使用相同接口，回填不限定当前周、宝宝或最近 50 条。
 
 支持出水、烧水与消烘的本地记录、官方出水历史同步，以及配置菜单中的 P30 奶瓶添加向导。
 本地记录保存于 HA 私有 Store；官方出水历史支持分页回填和重启续传。
@@ -24,7 +25,7 @@ BOLOLO Smart Control 是面向 Home Assistant 的波咯咯自定义集成。它�
 重点适配刘海妹妹全能 Z60 系列消毒柜与智能泡奶机 P30。设备字段和控制约束来自
 波咯咯 Android App 2.1.86 及其绑定的官方设备页面；静态协议分析、离线测试和真机
 验证分别记录。当前尚未完成这两款设备的真机联调，具体固件的 LAN 能力仍需验证。
-具体变更见 [v0.1.5 发布说明](docs/releases/0.1.5.md)。
+具体变更见 [v0.1.6 发布说明](docs/releases/0.1.6.md)。
 
 ## 通道策略
 
@@ -74,7 +75,7 @@ Home Assistant 的私有 Store 中。已有缓存后，默认模式启动不强�
 
 ### 安装包
 
-1. 将 Release 中的 `bololo-0.1.5.zip` 解压到 Home Assistant 配置目录。
+1. 将 Release 中的 `bololo-0.1.6.zip` 解压到 Home Assistant 配置目录。
 2. 确认最终文件路径如下，然后重启 Home Assistant：
 
 ```text
@@ -173,9 +174,19 @@ APK 中的 7 款 BLE 吸奶器与 1 款传输方式未知的产品不在本次�
 
 “用水总量”按出水量累加，单位为 mL，重复轮询不重复计入。官方出水历史完成回填后，
 “出水记录”和“用水总量”统一采用全部已缓存官方记录的条数和水量之和，不与本地观察重复相加，
-随官方历史同步更新；云端记录的修改和删除也会修正总量。回填前使用本地已确认水量累计，
-重启或清理最近 50 条明细不会清零。旧版升级只能从尚保留的本地明细恢复旧累计量，
+随官方历史同步更新；云端记录的修改和删除也会修正总量。官方回填完成且全部记录有确认水量前，
+“用水总量”显示未知，避免把 HA 接入后观察到的部分累计当作设备历史总量。
+本地累计仍单独保存于 `local_observed_total_ml` 属性，重启或清理最近 50 条明细不会清零。
+旧版升级只能从尚保留的本地明细恢复旧累计量，
 更早已裁剪的数据需通过官方历史回填补齐。`record_source` 属性标明当前来源。
+
+该官方接口对应 App“泡奶周报 → 所有记录”的按日记录，集成从时间戳 0 开始分页回填，
+不限定为当前周、当前宝宝或最近 50 条。总量实体的 `sync_status`、`staged_count`、
+`server_total` 和 `sync_error` 标明同步进度及失败原因；`oldest_record_date`、
+`newest_record_date` 是已缓存记录的最早、最晚时间戳（毫秒），可用来核对日期范围。
+`total_volume_complete` 仅在回填完成且全部条目都有水量时为真；`missing_volume_count`
+表示缺少水量的条数，缺失水量不会被当成 0 的完整用水总量。真正同步到空历史时总量为 0。
+官方服务的保留期限仍未知，回填完整不等于服务器保留了设备整个寿命的所有记录。
 
 记录依据设备回读产生，发送控制命令本身不会记账。烧水和消烘的 `ended` 仅表示观察到退出运行，
 不能区分正常结束与手动取消；暂停和恢复算同一次。`observation_gap` 表示观察中断，
@@ -302,6 +313,7 @@ Release。标签和安装包不会被新提交覆盖；后续发版需递增版�
 | [完整文档索引](docs/README.md) | 使用与分析文档入口 |
 | [发版工作流](docs/RELEASING.md) | 自动验证、版本约束、HACS 与手动安装包 |
 | [设备支持范围](docs/DEVICE_SUPPORT.md) | Z60/P30、数值范围、其他产品与验证边界 |
+| [v0.1.6 发布说明](docs/releases/0.1.6.md) | 用水总量完整性、同步进度及日期范围 |
 | [v0.1.5 发布说明](docs/releases/0.1.5.md) | 用水累计、消烘记录与数值显示修复 |
 | [v0.1.4 发布说明](docs/releases/0.1.4.md) | 操作记录、官方出水历史和 P30 奶瓶添加 |
 | [v0.1.1 发布说明](docs/releases/0.1.1.md) | 混合传输、配置、验证范围和升级方式 |
