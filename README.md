@@ -1,17 +1,17 @@
 # BOLOLO Smart Control
 
-[![Version](https://img.shields.io/badge/version-0.1.6-2f6f4e.svg)](custom_components/bololo/manifest.json)
+[![Version](https://img.shields.io/badge/version-0.1.7-2f6f4e.svg)](custom_components/bololo/manifest.json)
 [![Release workflow](https://github.com/maycode0-0/bololo-smart-control/actions/workflows/hacs-release.yml/badge.svg)](https://github.com/maycode0-0/bololo-smart-control/actions/workflows/hacs-release.yml)
 
 BOLOLO Smart Control 是面向 Home Assistant 的波咯咯自定义集成。它将云端账号、
 设备清单和局域网通信放在同一条设备、状态与控制链路中，默认优先使用 LAN，
 无法通过本地通道处理的请求按回退规则交给云端。
 
-## v0.1.6
+## v0.1.7
 
-本版修复 **将本地部分累计误显示为用水总量**的问题。官方历史回填完成且每条记录的水量均可确认前，
-用水总量显示“未知”，本地观察累计单独保存在属性中，并提供同步进度、缺失水量条数及缓存日期范围。
-已重新核对 App“泡奶周报 → 所有记录”入口使用相同接口，回填不限定当前周、宝宝或最近 50 条。
+本版修正 **官方出水历史请求的 JSON 封装**，采用 App“泡奶周报 → 所有记录”调用链的直接 JSON 请求。
+此前路径相同但外层封装不同；同时修复首页失败重试时截止时间不更新的问题。
+官方历史回填完成且每条记录的水量均可确认前，用水总量继续显示“未知”，并提供同步进度和缓存日期范围。
 
 支持出水、烧水与消烘的本地记录、官方出水历史同步，以及配置菜单中的 P30 奶瓶添加向导。
 本地记录保存于 HA 私有 Store；官方出水历史支持分页回填和重启续传。
@@ -25,7 +25,7 @@ BOLOLO Smart Control 是面向 Home Assistant 的波咯咯自定义集成。它�
 重点适配刘海妹妹全能 Z60 系列消毒柜与智能泡奶机 P30。设备字段和控制约束来自
 波咯咯 Android App 2.1.86 及其绑定的官方设备页面；静态协议分析、离线测试和真机
 验证分别记录。当前尚未完成这两款设备的真机联调，具体固件的 LAN 能力仍需验证。
-具体变更见 [v0.1.6 发布说明](docs/releases/0.1.6.md)。
+具体变更见 [v0.1.7 发布说明](docs/releases/0.1.7.md)。
 
 ## 通道策略
 
@@ -75,7 +75,7 @@ Home Assistant 的私有 Store 中。已有缓存后，默认模式启动不强�
 
 ### 安装包
 
-1. 将 Release 中的 `bololo-0.1.6.zip` 解压到 Home Assistant 配置目录。
+1. 将 Release 中的 `bololo-0.1.7.zip` 解压到 Home Assistant 配置目录。
 2. 确认最终文件路径如下，然后重启 Home Assistant：
 
 ```text
@@ -181,6 +181,7 @@ APK 中的 7 款 BLE 吸奶器与 1 款传输方式未知的产品不在本次�
 更早已裁剪的数据需通过官方历史回填补齐。`record_source` 属性标明当前来源。
 
 该官方接口对应 App“泡奶周报 → 所有记录”的按日记录，集成从时间戳 0 开始分页回填，
+请求体按该页面调用链直接发送分页 JSON，不添加 AEP 外层封装。
 不限定为当前周、当前宝宝或最近 50 条。总量实体的 `sync_status`、`staged_count`、
 `server_total` 和 `sync_error` 标明同步进度及失败原因；`oldest_record_date`、
 `newest_record_date` 是已缓存记录的最早、最晚时间戳（毫秒），可用来核对日期范围。
@@ -313,6 +314,7 @@ Release。标签和安装包不会被新提交覆盖；后续发版需递增版�
 | [完整文档索引](docs/README.md) | 使用与分析文档入口 |
 | [发版工作流](docs/RELEASING.md) | 自动验证、版本约束、HACS 与手动安装包 |
 | [设备支持范围](docs/DEVICE_SUPPORT.md) | Z60/P30、数值范围、其他产品与验证边界 |
+| [v0.1.7 发布说明](docs/releases/0.1.7.md) | 官方出水历史请求封装和首页失败重试修复 |
 | [v0.1.6 发布说明](docs/releases/0.1.6.md) | 用水总量完整性、同步进度及日期范围 |
 | [v0.1.5 发布说明](docs/releases/0.1.5.md) | 用水累计、消烘记录与数值显示修复 |
 | [v0.1.4 发布说明](docs/releases/0.1.4.md) | 操作记录、官方出水历史和 P30 奶瓶添加 |
