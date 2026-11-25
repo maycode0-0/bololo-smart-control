@@ -74,6 +74,8 @@ class CloudHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(final["complete"])
         self.assertFalse(final["syncing"])
         self.assertEqual(final["synced_count"], 3)
+        self.assertTrue(final["total_volume_complete"])
+        self.assertEqual(final["total_volume_ml"], 360)
         self.cloud.async_get_water_history.assert_awaited_with(
             DEVICE, current=2, size=2, start_time=0, end_time=NOW
         )
@@ -150,6 +152,10 @@ class CloudHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["synced_count"], 80)
         self.assertEqual(len(summary["records"]), 50)
         self.assertEqual(summary["total_volume_ml"], 80 * 120)
+        self.assertEqual(summary["volume_record_count"], 80)
+        self.assertEqual(summary["missing_volume_count"], 0)
+        self.assertEqual(summary["oldest_record_date"], NOW - 79)
+        self.assertEqual(summary["newest_record_date"], NOW)
         self.assertEqual(len(self.store.data["devices"][IDENTIFIER]["records"]), 80)
         self.assertEqual(summary["records"][0]["id"], 0)
         encoded = json.dumps(self.store.data)
@@ -212,6 +218,60 @@ class CloudHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(summary["complete"])
         self.assertEqual(summary["synced_count"], 1)
         self.assertEqual(summary["total_volume_ml"], 120)
+
+    async def test_records_without_volume_are_not_treated_as_confirmed_zero_usage(self):
+        missing = record(2)
+        missing["data"] = "{}"
+        summary = await self.sync([record(1), missing])
+        self.assertTrue(summary["complete"])
+        self.assertEqual(summary["total_volume_ml"], 120)
+        self.assertEqual(summary["volume_record_count"], 1)
+        self.assertEqual(summary["missing_volume_count"], 1)
+        self.assertFalse(summary["total_volume_complete"])
+
+    async def test_empty_history_is_a_confirmed_zero_only_after_sync_completes(self):
+        initial = self.manager.summary(IDENTIFIER)
+        self.assertFalse(initial["total_volume_complete"])
+        self.assertIsNone(initial["oldest_record_date"])
+        self.assertIsNone(initial["newest_record_date"])
+        final = await self.sync([])
+        self.assertTrue(final["total_volume_complete"])
+        self.assertEqual(final["total_volume_ml"], 0)
+
+    async def test_multi_year_history_over_thousand_records_resumes_and_sums_every_page(self):
+        now = 1_800_000_000_000
+        rows = [
+            record(index, date=now - index * 86_400_000, volume=100 + index % 5 * 5)
+            for index in range(1055)
+        ]
+        self.manager = CloudHistoryManager(None, self.store, page_size=100, max_pages=10)
+
+        async def page(device, *, current, size, start_time, end_time):
+            self.assertEqual(start_time, 0)
+            self.assertEqual(end_time, now)
+            return {"records": rows[(current - 1) * size : current * size], "total": len(rows)}
+
+        self.cloud.async_get_water_history.side_effect = page
+        with patch("custom_components.bololo.cloud_history.time.time", return_value=now / 1000):
+            await self.manager.async_sync(DEVICE, self.cloud)
+        partial = self.manager.summary(IDENTIFIER)
+        self.assertFalse(partial["complete"])
+        self.assertFalse(partial["total_volume_complete"])
+        self.assertEqual(partial["staged_count"], 1000)
+
+        self.manager = CloudHistoryManager(None, self.store)
+        await self.manager.async_load()
+        with patch(
+            "custom_components.bololo.cloud_history.time.time", return_value=now / 1000 + 60
+        ):
+            await self.manager.async_sync(DEVICE, self.cloud)
+        final = self.manager.summary(IDENTIFIER)
+        self.assertEqual(self.cloud.async_get_water_history.await_count, 11)
+        self.assertTrue(final["total_volume_complete"])
+        self.assertEqual(final["synced_count"], 1055)
+        self.assertEqual(final["total_volume_ml"], 116050)
+        self.assertEqual(len(final["records"]), 50)
+        self.assertEqual(final["oldest_record_date"], now - 1054 * 86_400_000)
 
     def test_naive_cloud_date_uses_home_assistant_timezone(self):
         with patch("homeassistant.util.dt.DEFAULT_TIME_ZONE", ZoneInfo("Asia/Shanghai")):

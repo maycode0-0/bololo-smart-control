@@ -18,6 +18,23 @@ def _complete_water_history(coordinator, identifier):
     return None
 
 
+def _water_sync_status(coordinator, identifier, summary):
+    if summary.get("sync_error"):
+        return "error"
+    if summary.get("complete") and not summary.get("total_volume_complete"):
+        return "missing_volume"
+    if summary.get("syncing") and getattr(coordinator.client, "mode", "cloud") != "lan":
+        return "syncing"
+    if summary.get("complete"):
+        return "complete"
+    state = (coordinator.data or {}).get(identifier)
+    if not state or not state.device.get("sno"):
+        return "missing_serial"
+    if getattr(coordinator.client, "mode", "cloud") == "lan":
+        return "cloud_disabled"
+    return "pending"
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     async_setup_datapoints(hass, entry, async_add_entities, "sensor", BololoSensor)
     coordinator = hass.data[DOMAIN][entry.entry_id]
@@ -64,21 +81,51 @@ class BololoSensor(BololoEntity, SensorEntity):
     def value(self):
         if self._water_total:
             cloud = _complete_water_history(self.coordinator, self.identifier)
-            if cloud is not None:
+            if cloud is not None and cloud.get("total_volume_complete"):
                 return cloud["total_volume_ml"]
-            return self.coordinator.history.summary(self.identifier, "water")["total_volume_ml"]
+            # Local observations omit activity before setup and between polls.
+            # Never publish that partial sum as the appliance's historical total.
+            return None
         return super().value
+
+    @property
+    def available(self):
+        if self._water_total:
+            # Keep cached totals and sync status readable while the device is offline.
+            return self.identifier in (self.coordinator.data or {})
+        return super().available
 
     @property
     def extra_state_attributes(self):
         attributes = super().extra_state_attributes
         if self._water_total and attributes is not None:
-            cloud = _complete_water_history(self.coordinator, self.identifier)
+            manager = self.coordinator.cloud_history
+            cloud = manager.summary(self.identifier) if manager is not None else {}
+            local = self.coordinator.history.summary(self.identifier, "water")
             attributes.update(
-                record_source="cloud" if cloud is not None else "home_assistant",
-                cloud_history_complete=cloud is not None,
-                last_synced=cloud.get("last_synced") if cloud is not None else None,
+                record_source="cloud" if cloud.get("complete") else None,
+                cloud_history_complete=cloud.get("complete", False),
+                total_volume_complete=cloud.get("total_volume_complete", False),
+                sync_status=_water_sync_status(self.coordinator, self.identifier, cloud),
+                local_observed_total_ml=local["total_volume_ml"],
+                local_observed_count=local["count"],
             )
+            for key in (
+                "last_synced",
+                "synced_count",
+                "staged_count",
+                "server_total",
+                "server_total_scope",
+                "syncing",
+                "sync_error",
+                "window_start",
+                "window_end",
+                "volume_record_count",
+                "missing_volume_count",
+                "oldest_record_date",
+                "newest_record_date",
+            ):
+                attributes[key] = cloud.get(key)
         return attributes
 
     @property

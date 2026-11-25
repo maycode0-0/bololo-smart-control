@@ -113,6 +113,10 @@ class FullSetupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(hass.states.get(target.entity_id).state, "40")
                 fault = next(item for item in entries if item.unique_id.endswith("_fault"))
                 self.assertEqual(hass.states.get(fault.entity_id).state, "0")
+                water_total = next(
+                    item for item in entries if item.unique_id.endswith("aabbccddeeff_record")
+                )
+                self.assertEqual(hass.states.get(water_total.entity_id).state, "unknown")
                 error = next(item for item in entries if item.unique_id.endswith("_error"))
                 self.assertEqual(hass.states.get(error.entity_id).state, "0")
                 storage = next(
@@ -159,6 +163,24 @@ class FullSetupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(state.state, "1")
                 self.assertEqual(state.attributes["records"][0]["outcome"], "ended")
                 self.assertFalse(state.attributes["cloud_sync_supported"])
+                history_client = SimpleNamespace(
+                    async_get_water_history=AsyncMock(
+                        return_value={
+                            "records": [
+                                {"id": index, "date": 1000 + index, "data": '{"waterOutput":120}'}
+                                for index in range(80)
+                            ],
+                            "total": 80,
+                        }
+                    )
+                )
+                await coordinator.cloud_history.async_sync(device, history_client)
+                coordinator.async_update_listeners()
+                state = hass.states.get(water_total.entity_id)
+                self.assertEqual(float(state.state), 9600)
+                self.assertTrue(state.attributes["total_volume_complete"])
+                self.assertEqual(state.attributes["synced_count"], 80)
+                self.assertEqual(state.attributes["oldest_record_date"], 1000)
                 self.assertTrue(coordinator._listeners)
                 self.assertTrue(await hass.config_entries.async_unload(entry.entry_id))
                 await hass.async_block_till_done()

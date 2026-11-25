@@ -284,11 +284,18 @@ class CloudHistoryManager:
     def summary(self, identifier):
         value = self._devices.get(identifier, _empty())
         records = sorted(value["records"].values(), key=lambda item: item["date"], reverse=True)
+        volumes = [item["waterOutput"] for item in records if "waterOutput" in item]
+        missing_volumes = len(records) - len(volumes)
         pending = value["pending"]
         return {
             "records": deepcopy(records[:50]),
             "synced_count": len(records),
-            "total_volume_ml": sum(item.get("waterOutput", 0) for item in records),
+            "total_volume_ml": sum(volumes),
+            "volume_record_count": len(volumes),
+            "missing_volume_count": missing_volumes,
+            "total_volume_complete": value["complete"] and missing_volumes == 0,
+            "oldest_record_date": records[-1]["date"] if records else None,
+            "newest_record_date": records[0]["date"] if records else None,
             "server_total": value["server_total"],
             "server_total_scope": "sync_window",
             "complete": value["complete"],
